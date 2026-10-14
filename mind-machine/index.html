@@ -204,6 +204,7 @@ const DEFAULTS = {
   fixation: true, readout: false, fadeSec: 5,
   imgOpacity: 100, imgBlend: 'source-over', imgMode: 'steady', imgFit: 'contain', imgScale: 80,
   imgAssign: 'same', slideSec: 20,
+  chargeComp: true,
   chargeMin: 11, gazeMin: 3, signalBlinks: 5, holdSec: 20, releaseSec: 10,
   imgColor: 'recolor', imgInk: '#000000', imgPaper: '#ffffff', imgPaperOn: false,
   audioOn: true, carrier: 200, beatSource: 'avg', manualBeat: 10, volume: 40, noise: 0,
@@ -225,8 +226,9 @@ const SCHEMA = [
     { key: 'gazeMin', type: 'range', label: 'Gaze at sigil first', min: 0, max: 10, step: 0.5, fmt: v => v == 0 ? 'off' : v + ' min', show: isSigil },
     { key: 'signalBlinks', type: 'range', label: 'Signal (1 s on / 1 s off)', min: 0, max: 20, step: 1, fmt: v => v == 0 ? 'off' : v + ' blinks', show: isSigil },
     { key: 'holdSec', type: 'range', label: 'Charge (sigil steady)', min: 0, max: 120, step: 5, fmt: v => v + ' s', show: isSigil },
+    { key: 'chargeComp', type: 'toggle', label: 'Switch light to complementary colour during charge', show: isSigil },
     { key: 'releaseSec', type: 'range', label: 'Release (fade out)', min: 0, max: 60, step: 1, fmt: v => v + ' s', show: isSigil,
-      note: 'The sigil only appears during the gaze and the charge sequence. Afterwards it stays hidden so you can forget it.' },
+      note: 'The sigil only appears during the gaze and the charge sequence. Afterwards it stays hidden so you can forget it. The complementary colour fades back during the release.' },
     { key: 'duration', type: 'range', label: 'Length', min: 1, max: 90, step: 1, fmt: v => v + ' min', show: isManual },
     { key: 'fadeSec', type: 'range', label: 'Fade in / out', min: 0, max: 30, step: 1, fmt: v => v + ' s' },
   ]},
@@ -370,16 +372,16 @@ function freqsAt(t) {
 }
 // Sigil visibility for the sigil-charge program: gate is the image multiplier (0..1).
 function sigilPhase(t) {
-  if (!PROGRAMS[S.program].sigil) return { gate: 1, label: '' };
+  if (!PROGRAMS[S.program].sigil) return { gate: 1, comp: 0, label: '' };
   const c = S.chargeMin * 60, sig = S.signalBlinks * 2;
-  if (t < c) return t < S.gazeMin * 60 ? { gate: 1, label: 'Gaze' } : { gate: 0, label: 'Descend' };
+  if (t < c) return t < S.gazeMin * 60 ? { gate: 1, comp: 0, label: 'Gaze' } : { gate: 0, comp: 0, label: 'Descend' };
   let u = t - c;
-  if (u < sig) return { gate: u % 2 < 1 ? 1 : 0, label: 'Signal' };
+  if (u < sig) return { gate: u % 2 < 1 ? 1 : 0, comp: 0, label: 'Signal' };
   u -= sig;
-  if (u < S.holdSec) return { gate: 1, label: 'Charge' };
+  if (u < S.holdSec) return { gate: 1, comp: 1, label: 'Charge' };
   u -= S.holdSec;
-  if (u < S.releaseSec) return { gate: 1 - u / S.releaseSec, label: 'Release' };
-  return { gate: 0, label: 'Forget' };
+  if (u < S.releaseSec) return { gate: 1 - u / S.releaseSec, comp: 1 - u / S.releaseSec, label: 'Release' };
+  return { gate: 0, comp: 0, label: 'Forget' };
 }
 function beatFor(L, R) {
   switch (S.beatSource) {
@@ -652,6 +654,19 @@ function wave(ph) {
     default: return ph < S.duty / 100 ? 1 : 0;
   }
 }
+// Rotate hue by deg (180 = complementary), keeping saturation and lightness.
+function hueRotate(hex, deg) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return hex;
+  const sat = d / (1 - Math.abs(2 * l - 1));
+  let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = (h * 60 + deg + 720) % 360;
+  const C = (1 - Math.abs(2 * l - 1)) * sat, X = C * (1 - Math.abs((h / 60) % 2 - 1)), m = l - C / 2;
+  [r, g, b] = h < 60 ? [C, X, 0] : h < 120 ? [X, C, 0] : h < 180 ? [0, C, X] : h < 240 ? [0, X, C] : h < 300 ? [X, 0, C] : [C, 0, X];
+  return '#' + [r, g, b].map(v => Math.round((v + m) * 255).toString(16).padStart(2, '0')).join('');
+}
 function hexA(hex, a) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
@@ -746,7 +761,8 @@ function frame(now) {
   const slideP = Math.min(1, slideT / XFADE);
   if (prevIdx !== null && slideP >= 1) prevIdx = null;
 
-  const sp = running ? sigilPhase(elapsed) : { gate: 1, label: '' };
+  const sp = running ? sigilPhase(elapsed) : { gate: 1, comp: 0, label: '' };
+  const comp = S.chargeComp ? sp.comp : 0;
   imgGate = sp.gate; phaseLabel = sp.label;
   const iL = running ? wave(phL) * env : .5;
   const iR = running ? wave((phR + S.phase / 360) % 1) * env : .5;
@@ -755,8 +771,8 @@ function frame(now) {
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   const half = W / 2, g = S.gap / 2;
-  drawEye('L', 0, half - g, iL, S.leftColor, L, slideP);
-  drawEye('R', half + g, half - g, iR, S.rightColor, R, slideP);
+  drawEye('L', 0, half - g, iL, comp ? hueRotate(S.leftColor, 180 * comp) : S.leftColor, L, slideP);
+  drawEye('R', half + g, half - g, iR, comp ? hueRotate(S.rightColor, 180 * comp) : S.rightColor, R, slideP);
 
   if (running) {
     audioUpdate(L, R, env);
