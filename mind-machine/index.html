@@ -179,6 +179,9 @@ const SIGIL_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAAJYCAYAAAC
 /* ---------- Programs: keyframes are [minute, leftEyeHz, rightEyeHz] ---------- */
 const PROGRAMS = {
   manual:   { name: 'Manual (fixed frequencies)', desc: 'Each eye holds the frequency you set below for the whole session.' },
+  sigil:    { name: 'Sigil charge · 18 min', sigil: true,
+              desc: 'Gaze at the sigil in alpha, descend to 6 Hz theta with it hidden, then a 1 s on / 1 s off signal, a steady charge, a fade-out release, and the sigil stays gone while you return.',
+              keys: [[0, 10, 10], [3, 10, 10], [9, 6, 6], [14, 6, 6], [18, 10, 10]] },
   alpha:    { name: 'Alpha drift · 15 min', desc: 'Both eyes in sync, easing from 12 Hz down into relaxed alpha and back.',
               keys: [[0, 12, 12], [3, 10, 10], [12, 9, 9], [15, 10, 10]] },
   split:    { name: 'Split alpha / theta · 20 min', desc: 'Left eye holds 10 Hz alpha while the right eye slides into 6 Hz theta.',
@@ -201,6 +204,7 @@ const DEFAULTS = {
   fixation: true, readout: false, fadeSec: 5,
   imgOpacity: 100, imgBlend: 'source-over', imgMode: 'steady', imgFit: 'contain', imgScale: 80,
   imgAssign: 'same', slideSec: 20,
+  chargeMin: 11, gazeMin: 3, signalBlinks: 5, holdSec: 20, releaseSec: 10,
   imgColor: 'recolor', imgInk: '#000000', imgPaper: '#ffffff', imgPaperOn: false,
   audioOn: true, carrier: 200, beatSource: 'avg', manualBeat: 10, volume: 40, noise: 0,
 };
@@ -212,10 +216,17 @@ function save() { try { localStorage.setItem('splitEyeMM2', JSON.stringify(S)); 
 /* ---------- Control schema ---------- */
 const hz = v => (+v).toFixed(1) + ' Hz';
 const isManual = s => s.program === 'manual';
+const isSigil = s => !!PROGRAMS[s.program].sigil;
 const SCHEMA = [
   { title: 'Session', items: [
     { key: 'program', type: 'select', label: 'Program', options: Object.entries(PROGRAMS).map(([k, p]) => [k, p.name]) },
     { type: 'custom', render: renderChartBlock },
+    { key: 'chargeMin', type: 'range', label: 'Charge at', min: 1, max: 17, step: 0.5, fmt: v => v + ' min', show: isSigil },
+    { key: 'gazeMin', type: 'range', label: 'Gaze at sigil first', min: 0, max: 10, step: 0.5, fmt: v => v == 0 ? 'off' : v + ' min', show: isSigil },
+    { key: 'signalBlinks', type: 'range', label: 'Signal (1 s on / 1 s off)', min: 0, max: 20, step: 1, fmt: v => v == 0 ? 'off' : v + ' blinks', show: isSigil },
+    { key: 'holdSec', type: 'range', label: 'Charge (sigil steady)', min: 0, max: 120, step: 5, fmt: v => v + ' s', show: isSigil },
+    { key: 'releaseSec', type: 'range', label: 'Release (fade out)', min: 0, max: 60, step: 1, fmt: v => v + ' s', show: isSigil,
+      note: 'The sigil only appears during the gaze and the charge sequence. Afterwards it stays hidden so you can forget it.' },
     { key: 'duration', type: 'range', label: 'Length', min: 1, max: 90, step: 1, fmt: v => v + ' min', show: isManual },
     { key: 'fadeSec', type: 'range', label: 'Fade in / out', min: 0, max: 30, step: 1, fmt: v => v + ' s' },
   ]},
@@ -331,7 +342,7 @@ function refreshVisibility() {
 function changed(key) {
   save();
   refreshVisibility();
-  if (['program', 'duration', 'leftHz', 'rightHz'].includes(key)) drawChart();
+  if (['program', 'duration', 'leftHz', 'rightHz', 'chargeMin', 'signalBlinks', 'holdSec', 'releaseSec', 'gazeMin'].includes(key)) drawChart();
   if (key === 'program' && running) { elapsed = 0; }
   if (key === 'audioOn' && running) { S.audioOn ? audioStart() : audioStop(); }
   if (key === 'imgAssign') { slideIdx = 0; prevIdx = null; }
@@ -356,6 +367,19 @@ function freqsAt(t) {
   }
   const z = k[k.length - 1];
   return { L: z[1], R: z[2] };
+}
+// Sigil visibility for the sigil-charge program: gate is the image multiplier (0..1).
+function sigilPhase(t) {
+  if (!PROGRAMS[S.program].sigil) return { gate: 1, label: '' };
+  const c = S.chargeMin * 60, sig = S.signalBlinks * 2;
+  if (t < c) return t < S.gazeMin * 60 ? { gate: 1, label: 'Gaze' } : { gate: 0, label: 'Descend' };
+  let u = t - c;
+  if (u < sig) return { gate: u % 2 < 1 ? 1 : 0, label: 'Signal' };
+  u -= sig;
+  if (u < S.holdSec) return { gate: 1, label: 'Charge' };
+  u -= S.holdSec;
+  if (u < S.releaseSec) return { gate: 1 - u / S.releaseSec, label: 'Release' };
+  return { gate: 0, label: 'Forget' };
 }
 function beatFor(L, R) {
   switch (S.beatSource) {
@@ -399,6 +423,15 @@ function drawChart() {
   g.textBaseline = 'alphabetic';
   g.textAlign = 'left'; g.fillText('0', padL, H - 4);
   g.textAlign = 'right'; g.fillText(Math.round(T / 60) + ' min', W - padR, H - 4);
+  if (PROGRAMS[S.program].sigil) {
+    const c0 = S.chargeMin * 60, c1 = Math.min(T, c0 + S.signalBlinks * 2 + S.holdSec + S.releaseSec);
+    g.fillStyle = tok('--led'); g.globalAlpha = .22;
+    g.fillRect(x(c0), padT, Math.max(2, x(c1) - x(c0)), H - padT - padB);
+    if (S.gazeMin > 0) { g.globalAlpha = .1; g.fillRect(x(0), padT, x(Math.min(S.gazeMin * 60, c0)) - x(0), H - padT - padB); }
+    g.globalAlpha = 1; g.fillStyle = tok('--led'); g.textAlign = 'center'; g.textBaseline = 'top';
+    g.fillText('charge', Math.min(W - padR - 22, x(c0) + 4), padT + 2);
+    g.textBaseline = 'alphabetic';
+  }
   for (const [k, col] of [['L', tok('--eye-l')], ['R', tok('--eye-r')]]) {
     g.strokeStyle = col; g.lineWidth = 2; g.beginPath();
     for (let i = 0; i <= 120; i++) { const t = T * i / 120, f = freqsAt(t)[k]; i ? g.lineTo(x(t), y(f)) : g.moveTo(x(t), y(f)); }
@@ -661,7 +694,7 @@ function drawEye(eye, x0, w, intensity, color, hzNow, slideP) {
   }
   // image overlay
   if (images.length) {
-    const op = S.imgOpacity / 100 * env;
+    const op = S.imgOpacity / 100 * env * imgGate;
     const ia = S.imgMode === 'light' ? op * intensity : S.imgMode === 'dark' ? op * (1 - intensity) : op;
     ctx.globalCompositeOperation = S.imgBlend;
     if (prevIdx !== null && slideP < 1) drawEyeImage(eyeImage(eye, prevIdx), cx, cy, fw, fh, ia * (1 - slideP));
@@ -684,7 +717,7 @@ function drawEye(eye, x0, w, intensity, color, hzNow, slideP) {
   }
 }
 
-let running = false, elapsed = 0, last = 0, phL = 0, phR = 0, env = 1;
+let running = false, elapsed = 0, last = 0, phL = 0, phR = 0, env = 1, imgGate = 1, phaseLabel = '';
 let slideIdx = 0, prevIdx = null, slideT = 0;
 const XFADE = 1.5;
 
@@ -713,6 +746,8 @@ function frame(now) {
   const slideP = Math.min(1, slideT / XFADE);
   if (prevIdx !== null && slideP >= 1) prevIdx = null;
 
+  const sp = running ? sigilPhase(elapsed) : { gate: 1, label: '' };
+  imgGate = sp.gate; phaseLabel = sp.label;
   const iL = running ? wave(phL) * env : .5;
   const iR = running ? wave((phR + S.phase / 360) % 1) * env : .5;
 
@@ -735,7 +770,7 @@ function frame(now) {
   if (tick % 15 === 0) {
     const left = Math.max(0, T - elapsed);
     $('status').textContent = running
-      ? `L ${L.toFixed(1)} Hz · R ${R.toFixed(1)} Hz · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')} left`
+      ? `${phaseLabel ? phaseLabel + ' · ' : ''}L ${L.toFixed(1)} Hz · R ${R.toFixed(1)} Hz · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')} left`
       : `Ready · ${Math.round(T / 60)} min session`;
     const cn = $('chartNow'); if (cn) cn.textContent = running ? `now ${L.toFixed(1)} / ${R.toFixed(1)} Hz` : '';
     if (running) drawChart();
