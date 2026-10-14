@@ -97,6 +97,11 @@ input[type=text] {
 }
 #sigilPreview { width: 100%; max-width: 240px; aspect-ratio: 1; display: block; margin: 0 auto; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
 .nums { font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+textarea#settingsCode {
+  width: 100%; box-sizing: border-box; min-height: 84px; resize: vertical; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font: 11.5px/1.45 var(--mono); color: var(--fg);
+}
+.saved { font-family: var(--mono); font-size: 12px; color: var(--led); min-height: 1em; }
 select {
   width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
   padding: 8px 10px;
@@ -218,11 +223,14 @@ const DEFAULTS = {
   chargeMin: 11, gazeMin: 3, signalBlinks: 5, holdSec: 20, releaseSec: 10,
   sigilText: 'MY WILL IS STRONG', sigilSquare: 'saturn', sigilCipher: 'gematria', sigilFit: 'zeros', sigilDedupe: true,
   sigilSize: 85, sigilWeight: 10, sigilCircle: true, sigilGrid: false,
+  useMadeSigil: false,
   imgColor: 'recolor', imgInk: '#000000', imgPaper: '#ffffff', imgPaperOn: false,
   audioOn: true, carrier: 200, beatSource: 'avg', manualBeat: 10, volume: 40, noise: 0,
 };
-const S = Object.assign({}, DEFAULTS);
-try { Object.assign(S, JSON.parse(localStorage.getItem('splitEyeMM2') || '{}')); } catch (e) {}
+function myDefaults() { try { return JSON.parse(localStorage.getItem('splitEyeMMDefault') || '{}'); } catch (e) { return {}; } }
+function cleanSettings(o) { const r = {}; for (const k in DEFAULTS) if (o && k in o && typeof o[k] === typeof DEFAULTS[k]) r[k] = o[k]; return r; }
+const S = Object.assign({}, DEFAULTS, cleanSettings(myDefaults()));
+try { Object.assign(S, cleanSettings(JSON.parse(localStorage.getItem('splitEyeMM2') || '{}'))); } catch (e) {}
 if (!PROGRAMS[S.program]) S.program = 'manual';
 function save() { try { localStorage.setItem('splitEyeMM2', JSON.stringify(S)); } catch (e) {} }
 
@@ -306,7 +314,9 @@ const SCHEMA = [
     { key: 'gap', type: 'range', label: 'Centre divider', min: 0, max: 40, step: 1, fmt: v => v + ' px' },
     { key: 'fixation', type: 'toggle', label: 'Fixation dot in each eye' },
     { key: 'readout', type: 'toggle', label: 'Show frequency readout during session' },
-    { type: 'custom', render: () => { const d = el('div', 'row'); d.innerHTML = '<div class="btns"><button class="ghost" type="button" id="resetBtn">Reset all settings</button></div>'; d.querySelector('button').onclick = () => { Object.assign(S, DEFAULTS); save(); buildPanel(); }; return d; } },
+  ]},
+  { title: 'Your settings', items: [
+    { type: 'custom', render: renderSettingsBlock },
   ]},
 ];
 
@@ -492,6 +502,45 @@ function drawChart() {
   }
 }
 
+/* ---------- Your settings: save as default, copy, load ---------- */
+function applySettings(o) {
+  Object.assign(S, DEFAULTS, cleanSettings(o));
+  if (!PROGRAMS[S.program]) S.program = 'manual';
+  save(); syncMadeSigil(); buildPanel();
+}
+function renderSettingsBlock() {
+  const row = el('div', 'row');
+  const hasMine = Object.keys(myDefaults()).length > 0;
+  row.innerHTML =
+    '<div class="btns"><button class="go" type="button" id="saveDefault">Save current settings as my default</button></div>' +
+    '<div class="saved" id="savedMsg">' + (hasMine ? 'You have a saved default.' : '') + '</div>' +
+    '<div class="btns"><button class="ghost" type="button" id="resetMine">Reset to my default</button>' +
+    '<button class="ghost" type="button" id="resetFactory">Reset to built-in default</button></div>' +
+    '<label for="settingsCode">Settings code</label>' +
+    '<textarea id="settingsCode" spellcheck="false" placeholder="Copy shows your settings here. Paste a code here and press Load to use it."></textarea>' +
+    '<div class="btns"><button class="ghost" type="button" id="copySettings">Copy settings</button><button class="ghost" type="button" id="loadSettings">Load code</button></div>' +
+    '<div class="note">Your default is saved in this browser. To use the same settings on another device, copy the code there and press Load. Your own uploaded photos aren\u2019t included; the sigils are.</div>';
+  const msg = row.querySelector('#savedMsg'), code = row.querySelector('#settingsCode');
+  const say = t => { msg.textContent = t; };
+  row.querySelector('#saveDefault').onclick = () => {
+    try { localStorage.setItem('splitEyeMMDefault', JSON.stringify(S)); say('Saved. The app now opens with these settings.'); }
+    catch (e) { say('This browser blocked saving. Use Copy settings to keep a copy.'); }
+  };
+  row.querySelector('#resetMine').onclick = () => { applySettings(myDefaults()); };
+  row.querySelector('#resetFactory').onclick = () => { applySettings({}); };
+  row.querySelector('#copySettings').onclick = () => {
+    code.value = JSON.stringify(S);
+    const done = () => say('Copied to the clipboard.');
+    const fallback = () => { code.focus(); code.select(); say('Code selected. Copy it from the box.'); };
+    try { navigator.clipboard.writeText(code.value).then(done, fallback); } catch (e) { fallback(); }
+  };
+  row.querySelector('#loadSettings').onclick = () => {
+    try { applySettings(JSON.parse(code.value)); $('savedMsg').textContent = 'Loaded. Press Save to make it your default.'; }
+    catch (e) { say('That code isn\u2019t valid. Copy the whole code, including the { } brackets.'); }
+  };
+  return row;
+}
+
 /* ---------- Refresh-rate awareness ---------- */
 let frameMs = 16.7;
 function renderRefreshNote() { const r = el('div', 'row'); r.appendChild(el('div', 'note', '')).id = 'refreshNote'; return r; }
@@ -619,7 +668,7 @@ function renderThumbs() {
     const d = el('div', 'thumb');
     const img = el('img'); img.src = im.thumb; img.alt = im.name || 'Overlay image';
     const b = el('button', null, '×'); b.type = 'button'; b.setAttribute('aria-label', 'Remove image');
-    b.onclick = () => { if (im.url) URL.revokeObjectURL(im.url); images.splice(i, 1); slideIdx = 0; prevIdx = null; renderThumbs(); };
+    b.onclick = () => { if (im.url) URL.revokeObjectURL(im.url); if (im === madeSigil) { S.useMadeSigil = false; save(); } images.splice(i, 1); slideIdx = 0; prevIdx = null; renderThumbs(); };
     d.append(img, b); t.appendChild(d);
   });
   if (!images.length) t.appendChild(el('div', 'note', 'No images. The light runs on its own.'));
@@ -689,14 +738,21 @@ function renderSigilBlock() {
     '<div class="nums" id="sigilNums"></div>' +
     '<div class="btns"><button class="ghost" type="button" id="useSigil">Use as overlay</button></div>';
   row.querySelector('#useSigil').onclick = () => {
-    if (!madeSigil || !images.includes(madeSigil)) {
-      madeSigil = { src: sigilCanvas, thumb: '', name: 'Your sigil' };
-      images.unshift(madeSigil);
-    }
+    S.useMadeSigil = true; save();
+    syncMadeSigil();
     slideIdx = 0; prevIdx = null;
     updateSigil();
   };
   return row;
+}
+function syncMadeSigil() {
+  const inList = madeSigil && images.includes(madeSigil);
+  if (S.useMadeSigil && !inList) {
+    madeSigil = madeSigil || { src: sigilCanvas, thumb: '', name: 'Your sigil' };
+    images.unshift(madeSigil);
+  } else if (!S.useMadeSigil && inList) images.splice(images.indexOf(madeSigil), 1);
+  slideIdx = 0; prevIdx = null;
+  renderThumbs();
 }
 function updateSigil() {
   drawSigil(sigilCanvas);
@@ -978,6 +1034,7 @@ document.addEventListener('visibilitychange', () => {
 
 /* ---------- Boot ---------- */
 images.push(makeSigil());
+syncMadeSigil();
 buildPanel();
 resize();
 requestAnimationFrame(frame);

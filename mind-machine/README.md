@@ -18,7 +18,7 @@ phone inside a VR / Cardboard-style headset so each lens sees one half of the sc
 - **Binaural audio** via Web Audio: carrier ± beat/2 per ear, beat derived from the eyes (average, difference,
   left, right) or set manually, with an optional pink-noise bed.
 - **Headset options**: round field per lens, eye-spacing adjust, centre divider, fixation dot.
-- Fullscreen and screen wake lock on start; settings are remembered locally.
+- Fullscreen and screen wake lock on start; settings are remembered locally. **Your settings** saves the current setup as your default, resets to it or to the built-in default, and copies/loads a settings code to move it between devices.
 
 Controls: tap the screen to show/hide the panel, Space to start/stop, Esc to stop, H to toggle the panel.
 
