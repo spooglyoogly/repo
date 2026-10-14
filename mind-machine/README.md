@@ -11,8 +11,8 @@ phone inside a VR / Cardboard-style headset so each lens sees one half of the sc
 - **Independent eye frequencies** (0.5–40 Hz) plus a right-eye phase offset (180° = alternating flash).
 - **Programs** that ramp each eye over time (alpha, split alpha/theta, theta, beta focus, sleep) with a live chart.
 - **Waveforms**: square (adjustable on-time), sine, triangle; per-eye colour and brightness; fade in/out.
-- **Image overlay**: load your own images, same image in both eyes, a different image per eye, or a side-by-side
-  stereo pair. Choose steady / flash-with-light / dark-phase timing, blend mode, opacity, size and a crossfading slideshow.
+- **Image overlay**: the default is a red sigil shown as black lines on red light. Load your own images, same image in both eyes, a different image per eye, or a side-by-side
+  stereo pair. Recolour lines to any colour (optional solid background), flip line and light colours, choose steady / flash-with-light / dark-phase timing, blend mode, opacity, size and a crossfading slideshow.
 - **Binaural audio** via Web Audio: carrier ± beat/2 per ear, beat derived from the eyes (average, difference,
   left, right) or set manually, with an optional pink-noise bed.
 - **Headset options**: round field per lens, eye-spacing adjust, centre divider, fixation dot.
