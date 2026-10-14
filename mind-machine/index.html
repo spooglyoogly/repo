@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Split-Eye Mind Machine</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: full-bleed stage split into two eye fields; a control console slides over from the right (bottom sheet on phones). */
+:root {
+  --void: #07060c;
+  --panel: #12101b;
+  --panel-2: #1b1827;
+  --line: #2b2740;
+  --fg: #ece8f5;
+  --muted: #958eae;
+  --led: #ffa040;
+  --led-ink: #1d0f02;
+  --eye-l: #ffa040;
+  --eye-r: #6cd4ff;
+  --danger: #ff5d6c;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--fg);
+  font-family: var(--display);
+  font-size: 14px;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: pointer; touch-action: manipulation; }
+body.running #stage { cursor: none; }
+
+.console {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(380px, 100%);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  z-index: 10;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  transition: transform .28s ease;
+}
+.console.hidden { transform: translateX(105%); }
+@media (max-width: 700px) {
+  .console { top: auto; left: 0; width: 100%; height: 64%; border-left: 0; border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; }
+  .console.hidden { transform: translateY(105%); }
+}
+@media (prefers-reduced-motion: reduce) { .console { transition: none; } }
+
+.head, .body {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.head { padding-block: 14px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+.brand { flex: 1; min-width: 0; }
+.brand h1 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -.01em; line-height: 1.1; text-wrap: balance; }
+.brand p { margin: 2px 0 0; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.body { flex: 1; overflow-y: auto; padding-block: 4px 28px; display: flex; flex-direction: column; gap: 4px; }
+
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; }
+
+.go {
+  background: var(--led); color: var(--led-ink); border: 0; border-radius: 999px;
+  padding: 10px 18px; font-weight: 800; font-size: 14px; white-space: nowrap;
+  box-shadow: 0 0 22px -4px var(--led);
+}
+body.running .go { background: var(--danger); box-shadow: 0 0 22px -4px var(--danger); }
+
+section { display: flex; flex-direction: column; gap: 12px; padding-block: 16px; border-bottom: 1px solid var(--line); }
+section:last-child { border-bottom: 0; }
+h2 { margin: 0; font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+
+.row { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.row label, .row .lbl { display: flex; justify-content: space-between; gap: 8px; font-size: 13.5px; }
+.row output { font-family: var(--mono); font-size: 12.5px; color: var(--led); font-variant-numeric: tabular-nums; }
+.row .note { font-size: 12px; color: var(--muted); line-height: 1.45; }
+.row .note.warn { color: var(--danger); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+input[type=range] { width: 100%; accent-color: var(--led); height: 22px; margin: 0; }
+select {
+  width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px;
+}
+.toggle { flex-direction: row !important; justify-content: flex-start !important; align-items: center; gap: 10px !important; cursor: pointer; }
+.toggle input { width: 18px; height: 18px; accent-color: var(--led); margin: 0; }
+.swatch { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.swatch input { width: 40px; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); padding: 2px; cursor: pointer; }
+
+.chart-wrap { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+#progChart { width: 100%; height: 110px; display: block; }
+.legend { display: flex; gap: 14px; font-family: var(--mono); font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
+.thumb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--panel-2); max-width: 100%; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb button { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(0,0,0,.7); color: var(--fg); font-size: 13px; line-height: 22px; padding: 0; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.ghost { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.ghost:hover { border-color: var(--muted); }
+
+.hint {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  font-family: var(--mono); font-size: 12px; color: var(--muted); background: rgba(7,6,12,.75);
+  padding: 6px 12px; border-radius: 999px; z-index: 5; pointer-events: none; transition: opacity .6s; white-space: nowrap;
+}
+.hint.fade { opacity: 0; }
+
+.gate {
+  position: fixed; inset: 0; z-index: 20; background: rgba(4,3,8,.88);
+  display: grid; place-items: center;
+  padding-block: 24px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.gate .card { max-width: 460px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.gate h3 { margin: 0; font-size: 20px; font-weight: 800; color: var(--danger); text-wrap: balance; }
+.gate p, .gate li { margin: 0; line-height: 1.5; color: var(--fg); font-size: 14px; }
+.gate ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.drop { outline: 2px dashed var(--led); outline-offset: -8px; }
+</style>
+</head>
+<body>
+
+<canvas id="stage" aria-label="Light field. Tap to show or hide controls."></canvas>
+
+<aside class="console" id="console">
+  <div class="head">
+    <div class="brand">
+      <h1>Split-Eye Mind Machine</h1>
+      <p id="status">Ready · display measuring…</p>
+    </div>
+    <button class="go" id="goBtn" type="button">Start</button>
+  </div>
+  <div class="body" id="panel"></div>
+</aside>
+
+<div class="hint fade" id="hint">Tap for controls · Space starts/stops</div>
+
+<div class="gate" id="gate" hidden>
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+    <h3 id="gateTitle">Flashing light warning</h3>
+    <p>This app flashes light at 0.5–40 Hz. Flicker in the 3–30 Hz range can trigger seizures in people with photosensitive epilepsy, sometimes with no prior history.</p>
+    <ul>
+      <li>Don't use it if you or close family have epilepsy or seizures.</li>
+      <li>Stop at once if you feel dizzy, nauseous, or notice twitching or vision changes.</li>
+      <li>Don't use it while driving or operating anything.</li>
+    </ul>
+    <p>Press <b>Stop</b>, Esc, or tap the screen to end a session at any time.</p>
+    <div class="btns">
+      <button class="go" id="gateOk" type="button">I understand, start</button>
+      <button class="ghost" id="gateNo" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileIn" accept="image/*" multiple hidden>
+
+<script>
+(() => {
+'use strict';
+
+/* ---------- Programs: keyframes are [minute, leftEyeHz, rightEyeHz] ---------- */
+const PROGRAMS = {
+  manual:   { name: 'Manual (fixed frequencies)', desc: 'Each eye holds the frequency you set below for the whole session.' },
+  alpha:    { name: 'Alpha drift · 15 min', desc: 'Both eyes in sync, easing from 12 Hz down into relaxed alpha and back.',
+              keys: [[0, 12, 12], [3, 10, 10], [12, 9, 9], [15, 10, 10]] },
+  split:    { name: 'Split alpha / theta · 20 min', desc: 'Left eye holds 10 Hz alpha while the right eye slides into 6 Hz theta.',
+              keys: [[0, 10, 10], [5, 10, 6], [15, 10, 6], [20, 10, 10]] },
+  theta:    { name: 'Theta descent · 25 min', desc: 'A 0.5 Hz offset between the eyes while both descend toward 5 Hz.',
+              keys: [[0, 10, 10.5], [8, 7, 7.5], [18, 5, 5.5], [25, 8, 8.5]] },
+  focus:    { name: 'Beta focus · 15 min', desc: 'Climbs into low beta with the right eye running 2 Hz above the left.',
+              keys: [[0, 10, 10], [3, 14, 15], [12, 16, 18], [15, 14, 14]] },
+  sleep:    { name: 'Sleep onset · 30 min', desc: 'Slow descent from alpha through theta into delta. Ends dim and slow.',
+              keys: [[0, 10, 10], [10, 6, 6], [25, 2.5, 3], [30, 1.5, 2]] },
+};
+
+/* ---------- Settings ---------- */
+const DEFAULTS = {
+  program: 'manual', duration: 15,
+  leftHz: 10, rightHz: 12, phase: 0,
+  wave: 'square', duty: 50, brightness: 70,
+  leftColor: '#ff8a3d', rightColor: '#ff8a3d',
+  shape: 'half', fieldSize: 80, gap: 4, eyeShift: 0,
+  fixation: true, readout: false, fadeSec: 5,
+  imgOpacity: 65, imgBlend: 'source-over', imgMode: 'steady', imgFit: 'contain', imgScale: 80,
+  imgAssign: 'same', slideSec: 20,
+  audioOn: true, carrier: 200, beatSource: 'avg', manualBeat: 10, volume: 40, noise: 0,
+};
+const S = Object.assign({}, DEFAULTS);
+try { Object.assign(S, JSON.parse(localStorage.getItem('splitEyeMM') || '{}')); } catch (e) {}
+if (!PROGRAMS[S.program]) S.program = 'manual';
+function save() { try { localStorage.setItem('splitEyeMM', JSON.stringify(S)); } catch (e) {} }
+
+/* ---------- Control schema ---------- */
+const hz = v => (+v).toFixed(1) + ' Hz';
+const isManual = s => s.program === 'manual';
+const SCHEMA = [
+  { title: 'Session', items: [
+    { key: 'program', type: 'select', label: 'Program', options: Object.entries(PROGRAMS).map(([k, p]) => [k, p.name]) },
+    { type: 'custom', render: renderChartBlock },
+    { key: 'duration', type: 'range', label: 'Length', min: 1, max: 90, step: 1, fmt: v => v + ' min', show: isManual },
+    { key: 'fadeSec', type: 'range', label: 'Fade in / out', min: 0, max: 30, step: 1, fmt: v => v + ' s' },
+  ]},
+  { title: 'Light · each eye', items: [
+    { key: 'leftHz', type: 'range', label: 'Left eye', min: 0.5, max: 40, step: 0.1, fmt: hz, show: isManual },
+    { key: 'rightHz', type: 'range', label: 'Right eye', min: 0.5, max: 40, step: 0.1, fmt: hz, show: isManual },
+    { type: 'custom', render: renderRefreshNote },
+    { key: 'phase', type: 'range', label: 'Right eye phase offset', min: 0, max: 180, step: 15, fmt: v => v + '°',
+      note: '180° with equal frequencies gives the classic alternating left/right flash.' },
+    { key: 'wave', type: 'select', label: 'Waveform', options: [['square', 'Square (hard on/off)'], ['sine', 'Sine (smooth pulse)'], ['triangle', 'Triangle']] },
+    { key: 'duty', type: 'range', label: 'On time (square)', min: 10, max: 90, step: 5, fmt: v => v + '%', show: s => s.wave === 'square' },
+    { key: 'brightness', type: 'range', label: 'Brightness', min: 5, max: 100, step: 1, fmt: v => v + '%' },
+    { type: 'colors' },
+  ]},
+  { title: 'Image overlay', items: [
+    { type: 'custom', render: renderImageBlock },
+    { key: 'imgAssign', type: 'select', label: 'Eyes see', options: [['same', 'Same image in both eyes'], ['alternate', 'Different image per eye'], ['stereo', 'Stereo pair (side-by-side image)']] },
+    { key: 'imgMode', type: 'select', label: 'Image timing', options: [['steady', 'Steady over the flashing'], ['light', 'Flashes with the light'], ['dark', 'Appears in the dark phase']] },
+    { key: 'imgBlend', type: 'select', label: 'Blend', options: [['source-over', 'Normal'], ['screen', 'Screen (glow)'], ['multiply', 'Multiply (silhouette)'], ['overlay', 'Overlay'], ['difference', 'Difference'], ['luminosity', 'Luminosity']] },
+    { key: 'imgOpacity', type: 'range', label: 'Opacity', min: 0, max: 100, step: 1, fmt: v => v + '%' },
+    { key: 'imgFit', type: 'select', label: 'Fit', options: [['contain', 'Fit inside field'], ['cover', 'Fill field']] },
+    { key: 'imgScale', type: 'range', label: 'Size', min: 10, max: 150, step: 1, fmt: v => v + '%' },
+    { key: 'slideSec', type: 'range', label: 'Slideshow', min: 0, max: 120, step: 5, fmt: v => v == 0 ? 'off' : 'every ' + v + ' s' },
+  ]},
+  { title: 'Binaural sound', items: [
+    { key: 'audioOn', type: 'toggle', label: 'Play binaural beat (use headphones)' },
+    { key: 'beatSource', type: 'select', label: 'Beat frequency', show: s => s.audioOn,
+      options: [['avg', 'Average of both eyes'], ['diff', 'Difference between eyes'], ['left', 'Match left eye'], ['right', 'Match right eye'], ['manual', 'Manual']] },
+    { key: 'manualBeat', type: 'range', label: 'Manual beat', min: 0.5, max: 40, step: 0.1, fmt: hz, show: s => s.audioOn && s.beatSource === 'manual' },
+    { key: 'carrier', type: 'range', label: 'Carrier tone', min: 60, max: 600, step: 5, fmt: v => v + ' Hz', show: s => s.audioOn,
+      note: 'Left ear hears carrier − beat/2, right ear carrier + beat/2.' },
+    { key: 'volume', type: 'range', label: 'Tone volume', min: 0, max: 100, step: 1, fmt: v => v + '%', show: s => s.audioOn },
+    { key: 'noise', type: 'range', label: 'Pink noise bed', min: 0, max: 100, step: 1, fmt: v => v + '%', show: s => s.audioOn },
+  ]},
+  { title: 'Headset & display', items: [
+    { key: 'shape', type: 'select', label: 'Light field', options: [['half', 'Fill each half of the screen'], ['round', 'Round field per eye (VR lenses)']] },
+    { key: 'fieldSize', type: 'range', label: 'Round field size', min: 20, max: 100, step: 1, fmt: v => v + '%', show: s => s.shape === 'round' },
+    { key: 'eyeShift', type: 'range', label: 'Eye spacing adjust', min: -20, max: 20, step: 1, fmt: v => (v > 0 ? '+' : '') + v + '%',
+      note: 'Moves each eye’s centre outward (+) or inward (−) to match your headset lenses.' },
+    { key: 'gap', type: 'range', label: 'Centre divider', min: 0, max: 40, step: 1, fmt: v => v + ' px' },
+    { key: 'fixation', type: 'toggle', label: 'Fixation dot in each eye' },
+    { key: 'readout', type: 'toggle', label: 'Show frequency readout during session' },
+    { type: 'custom', render: () => { const d = el('div', 'row'); d.innerHTML = '<div class="btns"><button class="ghost" type="button" id="resetBtn">Reset all settings</button></div>'; d.querySelector('button').onclick = () => { Object.assign(S, DEFAULTS); save(); buildPanel(); }; return d; } },
+  ]},
+];
+
+/* ---------- Panel ---------- */
+const $ = id => document.getElementById(id);
+function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+const panel = $('panel');
+const rows = [];
+
+function buildPanel() {
+  panel.innerHTML = '';
+  rows.length = 0;
+  for (const sec of SCHEMA) {
+    const s = el('section');
+    s.appendChild(el('h2', null, sec.title));
+    for (const it of sec.items) {
+      let row;
+      if (it.type === 'custom') row = it.render();
+      else if (it.type === 'colors') {
+        row = el('div', 'row');
+        row.innerHTML = '<span class="lbl">Light colour</span><div class="pair">' +
+          '<label class="swatch" for="c_left"><input type="color" id="c_left"> Left eye</label>' +
+          '<label class="swatch" for="c_right"><input type="color" id="c_right"> Right eye</label></div>';
+        const cl = row.querySelector('#c_left'), cr = row.querySelector('#c_right');
+        cl.value = S.leftColor; cr.value = S.rightColor;
+        cl.oninput = () => { S.leftColor = cl.value; save(); };
+        cr.oninput = () => { S.rightColor = cr.value; save(); };
+      } else {
+        row = el('div', 'row');
+        const id = 'f_' + it.key;
+        if (it.type === 'range') {
+          row.innerHTML = `<label for="${id}"><span>${it.label}</span><output></output></label><input type="range" id="${id}" min="${it.min}" max="${it.max}" step="${it.step}">`;
+          const inp = row.querySelector('input'), out = row.querySelector('output');
+          inp.value = S[it.key]; out.textContent = it.fmt(S[it.key]);
+          inp.oninput = () => { S[it.key] = +inp.value; out.textContent = it.fmt(S[it.key]); changed(it.key); };
+        } else if (it.type === 'select') {
+          row.innerHTML = `<label for="${id}">${it.label}</label><select id="${id}">${it.options.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>`;
+          const sel = row.querySelector('select');
+          sel.value = S[it.key];
+          sel.onchange = () => { S[it.key] = sel.value; changed(it.key); };
+        } else if (it.type === 'toggle') {
+          row.innerHTML = `<label class="toggle" for="${id}"><input type="checkbox" id="${id}"><span>${it.label}</span></label>`;
+          const cb = row.querySelector('input');
+          cb.checked = !!S[it.key];
+          cb.onchange = () => { S[it.key] = cb.checked; changed(it.key); };
+        }
+        if (it.note) row.appendChild(el('div', 'note', it.note));
+      }
+      row._item = it;
+      rows.push(row);
+      s.appendChild(row);
+    }
+    panel.appendChild(s);
+  }
+  refreshVisibility();
+  renderThumbs();
+  drawChart();
+}
+
+function refreshVisibility() {
+  for (const r of rows) if (r._item.show) r.hidden = !r._item.show(S);
+  const d = $('progDesc'); if (d) d.textContent = PROGRAMS[S.program].desc;
+}
+
+function changed(key) {
+  save();
+  refreshVisibility();
+  if (['program', 'duration', 'leftHz', 'rightHz'].includes(key)) drawChart();
+  if (key === 'program' && running) { elapsed = 0; }
+  if (key === 'audioOn' && running) { S.audioOn ? audioStart() : audioStop(); }
+  if (key === 'imgAssign') { slideIdx = 0; prevIdx = null; }
+  updateRefreshNote();
+}
+
+/* ---------- Program math ---------- */
+function totalSec() {
+  const p = PROGRAMS[S.program];
+  return p.keys ? p.keys[p.keys.length - 1][0] * 60 : S.duration * 60;
+}
+function freqsAt(t) {
+  const p = PROGRAMS[S.program];
+  if (!p.keys) return { L: S.leftHz, R: S.rightHz };
+  const k = p.keys, m = t / 60;
+  if (m <= k[0][0]) return { L: k[0][1], R: k[0][2] };
+  for (let i = 1; i < k.length; i++) {
+    if (m <= k[i][0]) {
+      const a = k[i - 1], b = k[i], u = (m - a[0]) / (b[0] - a[0]);
+      return { L: a[1] + (b[1] - a[1]) * u, R: a[2] + (b[2] - a[2]) * u };
+    }
+  }
+  const z = k[k.length - 1];
+  return { L: z[1], R: z[2] };
+}
+function beatFor(L, R) {
+  switch (S.beatSource) {
+    case 'diff': return Math.abs(L - R);
+    case 'left': return L;
+    case 'right': return R;
+    case 'manual': return S.manualBeat;
+    default: return (L + R) / 2;
+  }
+}
+
+/* ---------- Program chart ---------- */
+function renderChartBlock() {
+  const row = el('div', 'row');
+  row.innerHTML = '<div class="chart-wrap"><canvas id="progChart"></canvas>' +
+    '<div class="legend"><span><i style="background:var(--eye-l)"></i>Left eye</span><span><i style="background:var(--eye-r)"></i>Right eye</span><span id="chartNow"></span></div></div>' +
+    '<div class="note" id="progDesc"></div>';
+  return row;
+}
+function drawChart() {
+  const c = $('progChart'); if (!c) return;
+  const css = getComputedStyle(document.documentElement);
+  const tok = n => css.getPropertyValue(n).trim();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = c.clientWidth || 300, H = c.clientHeight || 110;
+  c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const T = totalSec();
+  let maxHz = 0;
+  for (let i = 0; i <= 60; i++) { const f = freqsAt(T * i / 60); maxHz = Math.max(maxHz, f.L, f.R); }
+  maxHz = Math.max(5, Math.ceil(maxHz / 5) * 5);
+  const padL = 30, padB = 18, padT = 6, padR = 6;
+  const x = t => padL + (W - padL - padR) * (t / T);
+  const y = f => padT + (H - padT - padB) * (1 - f / maxHz);
+  g.font = '10px ' + tok('--mono'); g.fillStyle = tok('--muted'); g.strokeStyle = tok('--line'); g.lineWidth = 1;
+  g.textBaseline = 'middle'; g.textAlign = 'right';
+  for (const f of [0, maxHz / 2, maxHz]) {
+    g.beginPath(); g.moveTo(padL, Math.round(y(f)) + .5); g.lineTo(W - padR, Math.round(y(f)) + .5); g.stroke();
+    g.fillText(f + '', padL - 5, y(f));
+  }
+  g.textBaseline = 'alphabetic';
+  g.textAlign = 'left'; g.fillText('0', padL, H - 4);
+  g.textAlign = 'right'; g.fillText(Math.round(T / 60) + ' min', W - padR, H - 4);
+  for (const [k, col] of [['L', tok('--eye-l')], ['R', tok('--eye-r')]]) {
+    g.strokeStyle = col; g.lineWidth = 2; g.beginPath();
+    for (let i = 0; i <= 120; i++) { const t = T * i / 120, f = freqsAt(t)[k]; i ? g.lineTo(x(t), y(f)) : g.moveTo(x(t), y(f)); }
+    g.stroke();
+  }
+  if (running) {
+    const px = x(Math.min(elapsed, T));
+    g.strokeStyle = tok('--fg'); g.lineWidth = 1; g.setLineDash([3, 3]);
+    g.beginPath(); g.moveTo(px, padT); g.lineTo(px, H - padB); g.stroke(); g.setLineDash([]);
+  }
+}
+
+/* ---------- Refresh-rate awareness ---------- */
+let frameMs = 16.7;
+function renderRefreshNote() { const r = el('div', 'row'); r.appendChild(el('div', 'note', '')).id = 'refreshNote'; return r; }
+function updateRefreshNote() {
+  const n = $('refreshNote'); if (!n) return;
+  const refresh = 1000 / frameMs, limit = refresh / 2;
+  let peak = 0; const T = totalSec();
+  for (let i = 0; i <= 60; i++) { const f = freqsAt(T * i / 60); peak = Math.max(peak, f.L, f.R); }
+  if (peak > limit) {
+    n.className = 'note warn';
+    n.textContent = `Your display runs at about ${Math.round(refresh)} Hz, so flashes above ${limit.toFixed(0)} Hz can't be shown cleanly. Lower the frequency or use a faster screen.`;
+  } else {
+    n.className = 'note';
+    n.textContent = `Display ≈ ${Math.round(refresh)} Hz, so flashes up to ${limit.toFixed(0)} Hz render cleanly. Sine waveform looks smoothest at high rates.`;
+  }
+}
+
+/* ---------- Images ---------- */
+const images = [];   // { src: CanvasImageSource, thumb: string, url?: string }
+function makeSample() {
+  const N = 1024, c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d'); g.translate(N / 2, N / 2);
+  const rings = [[16, 420, 70, '#ffffff'], [12, 320, 60, '#ffe2b8'], [8, 210, 54, '#ffffff'], [24, 470, 18, '#ffd08a']];
+  for (const [n, r, w, col] of rings) {
+    for (let i = 0; i < n; i++) {
+      g.save(); g.rotate(i * Math.PI * 2 / n);
+      g.beginPath(); g.moveTo(0, -r + w * 2.4);
+      g.quadraticCurveTo(w, -r + w * 1.1, 0, -r);
+      g.quadraticCurveTo(-w, -r + w * 1.1, 0, -r + w * 2.4);
+      g.fillStyle = col; g.globalAlpha = .9; g.fill();
+      g.restore();
+    }
+  }
+  g.globalAlpha = 1; g.lineWidth = 6; g.strokeStyle = '#ffffff';
+  for (const r of [120, 250, 370]) { g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.stroke(); }
+  const grd = g.createRadialGradient(0, 0, 0, 0, 0, 110); grd.addColorStop(0, '#ffffff'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.beginPath(); g.arc(0, 0, 110, 0, Math.PI * 2); g.fill();
+  const t = document.createElement('canvas'); t.width = t.height = 128;
+  const tg = t.getContext('2d'); tg.fillStyle = '#ff8a3d'; tg.fillRect(0, 0, 128, 128); tg.drawImage(c, 0, 0, 128, 128);
+  return { src: c, thumb: t.toDataURL(), name: 'Sample mandala' };
+}
+function addFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue;
+    const url = URL.createObjectURL(f), img = new Image();
+    img.onload = () => { images.push({ src: img, thumb: url, url, name: f.name }); renderThumbs(); };
+    img.src = url;
+  }
+}
+function renderImageBlock() {
+  const row = el('div', 'row');
+  row.innerHTML = '<div class="thumbs" id="thumbs"></div>' +
+    '<div class="btns"><button class="ghost" type="button" id="addImg">Add images…</button><button class="ghost" type="button" id="addSample">Add sample</button></div>' +
+    '<div class="note">Images stay on this device. You can also drop image files onto the screen.</div>';
+  row.querySelector('#addImg').onclick = () => $('fileIn').click();
+  row.querySelector('#addSample').onclick = () => { images.push(makeSample()); renderThumbs(); };
+  return row;
+}
+function renderThumbs() {
+  const t = $('thumbs'); if (!t) return;
+  t.innerHTML = '';
+  images.forEach((im, i) => {
+    const d = el('div', 'thumb');
+    const img = el('img'); img.src = im.thumb; img.alt = im.name || 'Overlay image';
+    const b = el('button', null, '×'); b.type = 'button'; b.setAttribute('aria-label', 'Remove image');
+    b.onclick = () => { if (im.url) URL.revokeObjectURL(im.url); images.splice(i, 1); slideIdx = 0; prevIdx = null; renderThumbs(); };
+    d.append(img, b); t.appendChild(d);
+  });
+  if (!images.length) t.appendChild(el('div', 'note', 'No images. The light runs on its own.'));
+}
+$('fileIn').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
+document.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('drop'); });
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('drop'); });
+document.addEventListener('drop', e => { e.preventDefault(); document.body.classList.remove('drop'); addFiles(e.dataTransfer.files); });
+
+/* ---------- Audio ---------- */
+let AC = null, A = null;
+function pinkBuffer(ctx) {
+  const len = ctx.sampleRate * 4, buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = .99886 * b0 + w * .0555179; b1 = .99332 * b1 + w * .0750759; b2 = .969 * b2 + w * .153852;
+      b3 = .8665 * b3 + w * .3104856; b4 = .55 * b4 + w * .5329522; b5 = -.7616 * b5 - w * .016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * .5362) * .11; b6 = w * .115926;
+    }
+  }
+  return buf;
+}
+function audioStart() {
+  if (!S.audioOn || A) return;
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    AC.resume();
+    const now = AC.currentTime;
+    const master = AC.createGain(); master.gain.setValueAtTime(0, now); master.gain.linearRampToValueAtTime(1, now + 2); master.connect(AC.destination);
+    const merger = AC.createChannelMerger(2);
+    const tone = AC.createGain(); tone.gain.value = 0; merger.connect(tone); tone.connect(master);
+    const oL = AC.createOscillator(), oR = AC.createOscillator();
+    oL.type = oR.type = 'sine';
+    oL.connect(merger, 0, 0); oR.connect(merger, 0, 1);
+    const noiseG = AC.createGain(); noiseG.gain.value = 0; noiseG.connect(master);
+    const nsrc = AC.createBufferSource(); nsrc.buffer = pinkBuffer(AC); nsrc.loop = true; nsrc.connect(noiseG);
+    oL.start(); oR.start(); nsrc.start();
+    A = { master, tone, oL, oR, noiseG, nsrc };
+  } catch (e) { A = null; }
+}
+function audioStop() {
+  if (!A) return;
+  const a = A; A = null;
+  const now = AC.currentTime;
+  a.master.gain.cancelScheduledValues(now);
+  a.master.gain.setValueAtTime(a.master.gain.value, now);
+  a.master.gain.linearRampToValueAtTime(0, now + 1.2);
+  setTimeout(() => { try { a.oL.stop(); a.oR.stop(); a.nsrc.stop(); a.master.disconnect(); } catch (e) {} }, 1400);
+}
+function audioUpdate(L, R, env) {
+  if (!A) return;
+  const now = AC.currentTime, beat = beatFor(L, R);
+  A.oL.frequency.setTargetAtTime(Math.max(20, S.carrier - beat / 2), now, .05);
+  A.oR.frequency.setTargetAtTime(S.carrier + beat / 2, now, .05);
+  A.tone.gain.setTargetAtTime(.45 * (S.volume / 100) ** 2 * env, now, .1);
+  A.noiseG.gain.setTargetAtTime(.6 * (S.noise / 100) ** 2 * env, now, .1);
+}
+
+/* ---------- Light rendering ---------- */
+const cv = $('stage'), ctx = cv.getContext('2d');
+const MONO = getComputedStyle(document.documentElement).getPropertyValue('--mono');
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  drawChart();
+}
+window.addEventListener('resize', resize);
+
+function wave(ph) {
+  switch (S.wave) {
+    case 'sine': return .5 - .5 * Math.cos(2 * Math.PI * ph);
+    case 'triangle': return ph < .5 ? ph * 2 : 2 - ph * 2;
+    default: return ph < S.duty / 100 ? 1 : 0;
+  }
+}
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+}
+function eyeImage(eye, idx) {
+  const n = images.length; if (!n) return null;
+  let im, half = null;
+  if (S.imgAssign === 'alternate') im = images[(idx * 2 + (eye === 'R' ? 1 : 0)) % n];
+  else { im = images[idx % n]; if (S.imgAssign === 'stereo') half = eye; }
+  const s = im.src, w = s.naturalWidth || s.width, h = s.naturalHeight || s.height;
+  if (!w || !h) return null;
+  return half ? { s, sx: half === 'L' ? 0 : w / 2, sy: 0, sw: w / 2, sh: h } : { s, sx: 0, sy: 0, sw: w, sh: h };
+}
+function drawEyeImage(spec, cx, cy, fw, fh, alpha) {
+  if (!spec || alpha <= 0.002) return;
+  const k = (S.imgFit === 'cover' ? Math.max(fw / spec.sw, fh / spec.sh) : Math.min(fw / spec.sw, fh / spec.sh)) * S.imgScale / 100;
+  const dw = spec.sw * k, dh = spec.sh * k;
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.drawImage(spec.s, spec.sx, spec.sy, spec.sw, spec.sh, cx - dw / 2, cy - dh / 2, dw, dh);
+}
+
+function drawEye(eye, x0, w, intensity, color, hzNow, slideP) {
+  const cxBase = x0 + w / 2, shift = (S.eyeShift / 100) * (w / 2);
+  const cx = cxBase + (eye === 'L' ? -shift : shift), cy = H / 2;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, 0, w, H); ctx.clip();
+  // light field
+  const a = intensity * (S.brightness / 100);
+  let fw = w, fh = H;
+  if (S.shape === 'round') {
+    const r = Math.min(w, H) / 2 * S.fieldSize / 100;
+    fw = fh = r * 2;
+    const g = ctx.createRadialGradient(cx, cy, r * .82, cx, cy, r);
+    g.addColorStop(0, hexA(color, a)); g.addColorStop(1, hexA(color, 0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+  } else {
+    ctx.fillStyle = hexA(color, a); ctx.fillRect(x0, 0, w, H);
+  }
+  // image overlay
+  if (images.length) {
+    const op = S.imgOpacity / 100 * env;
+    const ia = S.imgMode === 'light' ? op * intensity : S.imgMode === 'dark' ? op * (1 - intensity) : op;
+    ctx.globalCompositeOperation = S.imgBlend;
+    if (prevIdx !== null && slideP < 1) drawEyeImage(eyeImage(eye, prevIdx), cx, cy, fw, fh, ia * (1 - slideP));
+    drawEyeImage(eyeImage(eye, slideIdx), cx, cy, fw, fh, ia * (prevIdx !== null ? slideP : 1));
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  // fixation dot
+  if (S.fixation) {
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+  }
+  // readout
+  if (!running || S.readout) {
+    ctx.fillStyle = running ? 'rgba(255,255,255,.35)' : 'rgba(236,232,245,.85)';
+    ctx.textAlign = 'center';
+    ctx.font = `600 ${running ? 12 : 13}px ${MONO}`;
+    const label = (eye === 'L' ? 'LEFT ' : 'RIGHT ') + hzNow.toFixed(1) + ' Hz';
+    ctx.fillText(label, cx, H - 28 - (running ? 0 : 14));
+  }
+}
+
+let running = false, elapsed = 0, last = 0, phL = 0, phR = 0, env = 1;
+let slideIdx = 0, prevIdx = null, slideT = 0;
+const XFADE = 1.5;
+
+function frame(now) {
+  const dt = last ? Math.min(.1, (now - last) / 1000) : 0;
+  last = now;
+  if (dt > 0) frameMs = frameMs * .95 + dt * 1000 * .05;
+
+  const T = totalSec();
+  if (running) {
+    elapsed += dt;
+    if (elapsed >= T) { stop(); }
+  }
+  const t = running ? elapsed : 0;
+  const { L, R } = freqsAt(t);
+  if (running) { phL = (phL + L * dt) % 1; phR = (phR + R * dt) % 1; }
+  const fade = S.fadeSec;
+  env = !running ? 1 : fade > 0 ? Math.max(0, Math.min(1, elapsed / fade, (T - elapsed) / fade)) : 1;
+
+  // slideshow
+  const nSlides = S.imgAssign === 'alternate' ? Math.ceil(images.length / 2) : images.length;
+  if (running && S.slideSec > 0 && nSlides > 1) {
+    slideT += dt;
+    if (slideT >= S.slideSec) { prevIdx = slideIdx; slideIdx = (slideIdx + 1) % nSlides; slideT = 0; }
+  }
+  const slideP = Math.min(1, slideT / XFADE);
+  if (prevIdx !== null && slideP >= 1) prevIdx = null;
+
+  const iL = running ? wave(phL) * env : .5;
+  const iR = running ? wave((phR + S.phase / 360) % 1) * env : .5;
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const half = W / 2, g = S.gap / 2;
+  drawEye('L', 0, half - g, iL, S.leftColor, L, slideP);
+  drawEye('R', half + g, half - g, iR, S.rightColor, R, slideP);
+
+  if (running) {
+    audioUpdate(L, R, env);
+    if (S.readout) {
+      ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.textAlign = 'center';
+      const left = Math.max(0, T - elapsed);
+      ctx.fillText(`${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`, W / 2, 22);
+    }
+  }
+  tick++;
+  if (tick % 15 === 0) {
+    const left = Math.max(0, T - elapsed);
+    $('status').textContent = running
+      ? `L ${L.toFixed(1)} Hz · R ${R.toFixed(1)} Hz · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')} left`
+      : `Ready · ${Math.round(T / 60)} min session`;
+    const cn = $('chartNow'); if (cn) cn.textContent = running ? `now ${L.toFixed(1)} / ${R.toFixed(1)} Hz` : '';
+    if (running) drawChart();
+    if (tick % 60 === 0) updateRefreshNote();
+  }
+  requestAnimationFrame(frame);
+}
+let tick = 0;
+
+/* ---------- Session control ---------- */
+let wakeLock = null, accepted = false;
+const consoleEl = $('console'), hint = $('hint');
+function showPanel(v) {
+  consoleEl.classList.toggle('hidden', !v);
+  if (!v) { hint.classList.remove('fade'); clearTimeout(showPanel.t); showPanel.t = setTimeout(() => hint.classList.add('fade'), 2500); }
+  else hint.classList.add('fade');
+}
+function requestStart() { if (!accepted) { $('gate').hidden = false; $('gateOk').focus(); } else start(); }
+function start() {
+  running = true; elapsed = 0; phL = phR = 0; slideT = 0; prevIdx = null; slideIdx = 0;
+  document.body.classList.add('running');
+  $('goBtn').textContent = 'Stop';
+  showPanel(false);
+  try { const p = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); p && p.catch(() => {}); } catch (e) {}
+  try { navigator.wakeLock && navigator.wakeLock.request('screen').then(l => wakeLock = l, () => {}); } catch (e) {}
+  audioStart();
+}
+function stop() {
+  running = false;
+  document.body.classList.remove('running');
+  $('goBtn').textContent = 'Start';
+  audioStop();
+  try { wakeLock && wakeLock.release(); } catch (e) {} wakeLock = null;
+  try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (e) {}
+  showPanel(true);
+  drawChart();
+}
+$('goBtn').onclick = () => running ? stop() : requestStart();
+$('gateOk').onclick = () => { accepted = true; $('gate').hidden = true; start(); };
+$('gateNo').onclick = () => { $('gate').hidden = true; };
+cv.addEventListener('click', () => showPanel(consoleEl.classList.contains('hidden')));
+document.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input,select,textarea')) return;
+  if (e.code === 'Space') { e.preventDefault(); running ? stop() : requestStart(); }
+  else if (e.key === 'Escape') { if (!$('gate').hidden) $('gate').hidden = true; else if (running) stop(); }
+  else if (e.key === 'h' || e.key === 'H') showPanel(consoleEl.classList.contains('hidden'));
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && running && !wakeLock && navigator.wakeLock) navigator.wakeLock.request('screen').then(l => wakeLock = l, () => {});
+});
+
+/* ---------- Boot ---------- */
+images.push(makeSample());
+buildPanel();
+resize();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
