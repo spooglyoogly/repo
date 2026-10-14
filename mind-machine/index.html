@@ -204,7 +204,7 @@ const DEFAULTS = {
   fixation: true, readout: false, fadeSec: 5,
   imgOpacity: 100, imgBlend: 'source-over', imgMode: 'steady', imgFit: 'contain', imgScale: 80,
   imgAssign: 'same', slideSec: 20,
-  chargeComp: true,
+  chargeComp: true, cueSec: 2,
   chargeMin: 11, gazeMin: 3, signalBlinks: 5, holdSec: 20, releaseSec: 10,
   imgColor: 'recolor', imgInk: '#000000', imgPaper: '#ffffff', imgPaperOn: false,
   audioOn: true, carrier: 200, beatSource: 'avg', manualBeat: 10, volume: 40, noise: 0,
@@ -225,6 +225,8 @@ const SCHEMA = [
     { key: 'chargeMin', type: 'range', label: 'Charge at', min: 1, max: 17, step: 0.5, fmt: v => v + ' min', show: isSigil },
     { key: 'gazeMin', type: 'range', label: 'Gaze at sigil first', min: 0, max: 10, step: 0.5, fmt: v => v == 0 ? 'off' : v + ' min', show: isSigil },
     { key: 'signalBlinks', type: 'range', label: 'Signal (1 s on / 1 s off)', min: 0, max: 20, step: 1, fmt: v => v == 0 ? 'off' : v + ' blinks', show: isSigil },
+    { key: 'cueSec', type: 'range', label: 'Closed-eye cue (slow pulse)', min: 0, max: 10, step: 1, fmt: v => v == 0 ? 'off' : v + ' s', show: isSigil,
+      note: 'Right before the charge the flicker stops and the whole field swells bright and dim once per second, so you can feel the change coming with your eyes closed.' },
     { key: 'holdSec', type: 'range', label: 'Charge (sigil steady)', min: 0, max: 120, step: 5, fmt: v => v + ' s', show: isSigil },
     { key: 'chargeComp', type: 'toggle', label: 'Switch light to complementary colour during charge', show: isSigil },
     { key: 'releaseSec', type: 'range', label: 'Release (fade out)', min: 0, max: 60, step: 1, fmt: v => v + ' s', show: isSigil,
@@ -378,6 +380,8 @@ function sigilPhase(t) {
   let u = t - c;
   if (u < sig) return { gate: u % 2 < 1 ? 1 : 0, comp: 0, label: 'Signal' };
   u -= sig;
+  if (u < S.cueSec) return { gate: 0, comp: 0, label: 'Cue', pulse: .5 - .5 * Math.cos(2 * Math.PI * u) };
+  u -= S.cueSec;
   if (u < S.holdSec) return { gate: 1, comp: 1, label: 'Charge' };
   u -= S.holdSec;
   if (u < S.releaseSec) return { gate: 1 - u / S.releaseSec, comp: 1 - u / S.releaseSec, label: 'Release' };
@@ -426,7 +430,7 @@ function drawChart() {
   g.textAlign = 'left'; g.fillText('0', padL, H - 4);
   g.textAlign = 'right'; g.fillText(Math.round(T / 60) + ' min', W - padR, H - 4);
   if (PROGRAMS[S.program].sigil) {
-    const c0 = S.chargeMin * 60, c1 = Math.min(T, c0 + S.signalBlinks * 2 + S.holdSec + S.releaseSec);
+    const c0 = S.chargeMin * 60, c1 = Math.min(T, c0 + S.signalBlinks * 2 + S.cueSec + S.holdSec + S.releaseSec);
     g.fillStyle = tok('--led'); g.globalAlpha = .22;
     g.fillRect(x(c0), padT, Math.max(2, x(c1) - x(c0)), H - padT - padB);
     if (S.gazeMin > 0) { g.globalAlpha = .1; g.fillRect(x(0), padT, x(Math.min(S.gazeMin * 60, c0)) - x(0), H - padT - padB); }
@@ -764,8 +768,9 @@ function frame(now) {
   const sp = running ? sigilPhase(elapsed) : { gate: 1, comp: 0, label: '' };
   const comp = S.chargeComp ? sp.comp : 0;
   imgGate = sp.gate; phaseLabel = sp.label;
-  const iL = running ? wave(phL) * env : .5;
-  const iR = running ? wave((phR + S.phase / 360) % 1) * env : .5;
+  const cue = sp.pulse != null;   // closed-eye cue: slow pulse replaces the flicker
+  const iL = !running ? .5 : (cue ? sp.pulse : wave(phL)) * env;
+  const iR = !running ? .5 : (cue ? sp.pulse : wave((phR + S.phase / 360) % 1)) * env;
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
