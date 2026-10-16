@@ -236,7 +236,8 @@ const DEFAULTS = {
   sigilSize: 85, sigilWeight: 10, sigilCircle: true, sigilGrid: false,
   useMadeSigil: false,
   breathOn: false, breathPattern: 'tantric', breathIn: 6, breathHoldIn: 2, breathOut: 6, breathHoldOut: 2,
-  breathLight: 'replace', breathFloor: 5, breathSound: true, sigilBreath: 'holdIn', sigilAlt: false, sigilAltHz: 2,
+  breathLight: 'modulate', breathFloor: 5,
+  breathHud: true, hudSize: 30, hudOpacity: 80, hudColor: '#ffffff', hudText: true, breathSound: true, sigilBreath: 'holdIn', sigilAlt: false, sigilAltHz: 2,
   imgColor: 'recolor', imgInk: '#000000', imgPaper: '#ffffff', imgPaperOn: false,
   audioOn: true, carrier: 200, beatSource: 'avg', manualBeat: 10, volume: 40, noise: 0,
 };
@@ -276,7 +277,16 @@ const SCHEMA = [
     { key: 'breathHoldOut', type: 'range', label: 'Hold empty', min: 0, max: 30, step: 0.5, fmt: v => v + ' s', show: s => s.breathOn },
     { type: 'custom', render: renderBreathNote, show: s => s.breathOn },
     { key: 'breathLight', type: 'select', label: 'Flicker during breathing', show: s => s.breathOn, options: [
-      ['replace', 'Off: smooth glow that breathes'], ['modulate', 'On: flicker keeps going, brightness breathes']] },
+      ['modulate', 'Flicker keeps going, brightness breathes'], ['steady', 'Flicker unchanged, the indicator shows the breath'], ['replace', 'No flicker: a smooth glow that breathes']] },
+    { key: 'breathHud', type: 'toggle', label: 'Breath indicator in each eye', show: s => s.breathOn },
+    { key: 'hudSize', type: 'range', label: 'Indicator size', min: 10, max: 48, step: 1, fmt: v => v + '%', show: s => s.breathOn && s.breathHud },
+    { key: 'hudOpacity', type: 'range', label: 'Indicator brightness', min: 15, max: 100, step: 1, fmt: v => v + '%', show: s => s.breathOn && s.breathHud },
+    { type: 'custom', show: s => s.breathOn && s.breathHud, render: () => {
+      const r = el('div', 'row');
+      r.innerHTML = '<label class="swatch" for="c_hud"><input type="color" id="c_hud"> Indicator colour</label>';
+      const c = r.querySelector('input'); c.value = S.hudColor; c.oninput = () => { S.hudColor = c.value; save(); };
+      return r; } },
+    { key: 'hudText', type: 'toggle', label: 'Phase name and countdown', show: s => s.breathOn && s.breathHud },
     { key: 'breathFloor', type: 'range', label: 'Lowest light on empty lungs', min: 0, max: 50, step: 1, fmt: v => v + '%', show: s => s.breathOn },
     { key: 'breathSound', type: 'toggle', label: 'Sound swells and falls with the breath', show: s => s.breathOn && s.audioOn },
     { key: 'sigilBreath', type: 'select', label: 'Show the sigil', show: s => s.breathOn, options: [
@@ -433,7 +443,7 @@ function changed(key) {
   if (key === 'program' && running) { elapsed = 0; }
   if (key === 'program' && PROGRAMS[S.program].breath) {
     // the tantric program turns on the breath guide and alternating sigil
-    Object.assign(S, { breathOn: true, sigilAlt: true, sigilBreath: 'holdIn' });
+    Object.assign(S, { breathOn: true, sigilAlt: true, sigilBreath: 'holdIn', breathLight: 'modulate', breathHud: true });
     save(); buildPanel(); return;
   }
   if (key === 'breathPattern' && BREATH_PRESETS[S.breathPattern].v) {
@@ -592,15 +602,17 @@ function breathCycle() { return S.breathIn + S.breathHoldIn + S.breathOut + S.br
 // Breath level 0..1 with eased fades, plus the phase name.
 function breathAt(t) {
   const c = breathCycle();
-  if (!(c > 0)) return { b: 1, label: '' };
+  if (!(c > 0)) return { b: 1, label: '', idx: 0, u: 0, dur: 1, ct: 0, c: 1 };
+  const ct = t % c;
   let u = t % c;
   const ease = x => .5 - .5 * Math.cos(Math.PI * x);
-  if (u < S.breathIn) return { b: ease(u / S.breathIn), label: 'Inhale' };
+  if (u < S.breathIn) return { b: ease(u / S.breathIn), label: 'Inhale', idx: 0, u, dur: S.breathIn, ct, c };
   u -= S.breathIn;
-  if (u < S.breathHoldIn) return { b: 1, label: 'Hold' };
+  if (u < S.breathHoldIn) return { b: 1, label: 'Hold', idx: 1, u, dur: S.breathHoldIn, ct, c };
   u -= S.breathHoldIn;
-  if (u < S.breathOut) return { b: 1 - ease(u / S.breathOut), label: 'Exhale' };
-  return { b: 0, label: 'Hold empty' };
+  if (u < S.breathOut) return { b: 1 - ease(u / S.breathOut), label: 'Exhale', idx: 2, u, dur: S.breathOut, ct, c };
+  u -= S.breathOut;
+  return { b: 0, label: 'Hold empty', idx: 3, u, dur: S.breathHoldOut, ct, c };
 }
 function renderBreathNote() { const r = el('div', 'row'); r.appendChild(el('div', 'note', '')).id = 'breathNote'; return r; }
 function updateBreathNote() {
@@ -951,6 +963,72 @@ function drawEyeImage(spec, cx, cy, fw, fh, alpha) {
   ctx.drawImage(spec.s, spec.sx, spec.sy, spec.sw, spec.sh, cx - dw / 2, cy - dh / 2, dw, dh);
 }
 
+// Breath indicator: an instrument-style dial, drawn steady (not flickering) and identical in both eyes so it fuses.
+let hud = null;
+const HUD_WORDS = ['INHALE', 'HOLD', 'EXHALE', 'EMPTY'];
+function drawHud(cx, cy, size) {
+  const h = hud, R = size * S.hudSize / 100, a = S.hudOpacity / 100 * env;
+  if (a <= .01 || R < 8) return;
+  const TOP = -Math.PI / 2, TAU = Math.PI * 2, col = S.hudColor;
+  // stroke a path twice: dark halo first so it reads over bright and dark phases
+  const ink = (path, w, alpha = 1, dash) => {
+    ctx.setLineDash(dash || []);
+    ctx.strokeStyle = `rgba(0,0,0,${.6 * a * alpha})`; ctx.lineWidth = w + 3; path(); ctx.stroke();
+    ctx.strokeStyle = hexA(col, a * alpha); ctx.lineWidth = w; path(); ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  const arc = (r, a0, a1) => () => { ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); };
+  ctx.save(); ctx.lineCap = 'butt';
+  // bezel: 60 ticks, every 5th long
+  ink(() => {
+    ctx.beginPath();
+    for (let i = 0; i < 60; i++) {
+      const t = TOP + TAU * i / 60, r1 = R * (i % 5 ? .95 : .91);
+      ctx.moveTo(cx + Math.cos(t) * R, cy + Math.sin(t) * R); ctx.lineTo(cx + Math.cos(t) * r1, cy + Math.sin(t) * r1);
+    }
+  }, 1.5, .55);
+  // cycle ring: inhale / hold / exhale / hold segments sized to their timings, current one bright
+  const durs = [S.breathIn, S.breathHoldIn, S.breathOut, S.breathHoldOut], gap = .05;
+  let acc = 0;
+  durs.forEach((d, i) => {
+    if (d > 0) {
+      const a0 = TOP + TAU * acc / h.c + gap / 2, a1 = TOP + TAU * (acc + d) / h.c - gap / 2;
+      if (a1 > a0) ink(arc(R * 1.07, a0, a1), Math.max(2, R * .035), i === h.idx ? 1 : .35, i % 2 ? [R * .03, R * .03] : null);
+    }
+    acc += d;
+  });
+  // cursor: inward-pointing triangle at the current point of the cycle
+  const ca = TOP + TAU * h.ct / h.c, tip = R * 1.13, base = R * 1.22, wd = R * .05;
+  const tri = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(ca) * tip, cy + Math.sin(ca) * tip);
+    ctx.lineTo(cx + Math.cos(ca) * base - Math.sin(ca) * wd, cy + Math.sin(ca) * base + Math.cos(ca) * wd);
+    ctx.lineTo(cx + Math.cos(ca) * base + Math.sin(ca) * wd, cy + Math.sin(ca) * base - Math.cos(ca) * wd);
+    ctx.closePath();
+  };
+  tri(); ctx.fillStyle = `rgba(0,0,0,${.6 * a})`; ctx.lineWidth = 3; ctx.strokeStyle = ctx.fillStyle; ctx.stroke();
+  ctx.fillStyle = hexA(col, a); ctx.fill();
+  // lung gauge: track plus fill from 12 o'clock
+  const gw = Math.max(3, R * .07);
+  ink(arc(R * .82, 0, TAU), gw, .18);
+  if (h.b > .002) ink(arc(R * .82, TOP, TOP + TAU * h.b), gw, 1);
+  // phase progress: thin inner sweep
+  if (h.dur > 0) ink(arc(R * .72, TOP, TOP + TAU * Math.min(1, h.u / h.dur)), 1.5, .7);
+  // phase name and countdown either side of the fixation point
+  if (S.hudText) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    const txt = (str, y, px, alpha) => {
+      ctx.font = `600 ${px}px ${MONO}`;
+      ctx.lineWidth = Math.max(3, px * .22); ctx.strokeStyle = `rgba(0,0,0,${.6 * a})`; ctx.strokeText(str, cx, y);
+      ctx.fillStyle = hexA(col, a * alpha); ctx.fillText(str, cx, y);
+    };
+    txt(HUD_WORDS[h.idx], cy - R * .34, Math.max(9, R * .13), .9);
+    txt(String(Math.max(1, Math.ceil(h.dur - h.u))), cy + R * .36, Math.max(12, R * .3), 1);
+    ctx.textBaseline = 'alphabetic';
+  }
+  ctx.restore();
+}
+
 function drawEye(eye, x0, w, intensity, color, hzNow, slideP, gate) {
   const cxBase = x0 + w / 2, shift = (S.eyeShift / 100) * (w / 2);
   const cx = cxBase + (eye === 'L' ? -shift : shift), cy = H / 2;
@@ -979,6 +1057,7 @@ function drawEye(eye, x0, w, intensity, color, hzNow, slideP, gate) {
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   }
   ctx.restore();
+  if (hud) drawHud(cx, cy, Math.min(w, H));
   // fixation dot
   if (S.fixation) {
     ctx.fillStyle = 'rgba(255,255,255,.55)';
@@ -1030,7 +1109,9 @@ function frame(now) {
   // breath guide: smooth glow (replace) or flicker scaled by the breath (modulate)
   const bt = running && S.breathOn ? breathAt(elapsed) : null;
   const lvl = bt ? S.breathFloor / 100 + (1 - S.breathFloor / 100) * bt.b : 1;
-  const lightOf = w => cue ? sp.pulse : bt ? (S.breathLight === 'replace' ? lvl : w * lvl) : w;
+  const lightOf = w => cue ? sp.pulse : !bt || S.breathLight === 'steady' ? w : S.breathLight === 'replace' ? lvl : w * lvl;
+  // indicator: live while running, a sample frame in the idle preview
+  hud = S.breathOn && S.breathHud ? (bt || (running ? null : Object.assign(breathAt(S.breathIn * .6), { b: .6 }))) : null;
   const iL = !running ? .5 : lightOf(wave(phL)) * env;
   const iR = !running ? .5 : lightOf(wave((phR + S.phase / 360) % 1)) * env;
   // alternating sigil: one eye at a time, swapping at sigilAltHz
