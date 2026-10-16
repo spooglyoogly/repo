@@ -199,6 +199,9 @@ const PROGRAMS = {
               keys: [[0, 10, 10], [3, 10, 10], [9, 6, 6], [14, 6, 6], [18, 10, 10]] },
   alpha:    { name: 'Alpha drift · 15 min', desc: 'Both eyes in sync, easing from 12 Hz down into relaxed alpha and back.',
               keys: [[0, 12, 12], [3, 10, 10], [12, 9, 9], [15, 10, 10]] },
+  tantric:  { name: 'Tantric breath · 20 min', breath: true,
+              desc: 'The light fades in as you inhale, stays bright while you hold, and fades out as you exhale, while the sigil flashes left eye, right eye, without stopping.',
+              keys: [[0, 6, 6], [20, 6, 6]] },
   split:    { name: 'Split alpha / theta · 20 min', desc: 'Left eye holds 10 Hz alpha while the right eye slides into 6 Hz theta.',
               keys: [[0, 10, 10], [5, 10, 6], [15, 10, 6], [20, 10, 10]] },
   theta:    { name: 'Theta descent · 25 min', desc: 'A 0.5 Hz offset between the eyes while both descend toward 5 Hz.',
@@ -207,6 +210,14 @@ const PROGRAMS = {
               keys: [[0, 10, 10], [3, 14, 15], [12, 16, 18], [15, 14, 14]] },
   sleep:    { name: 'Sleep onset · 30 min', desc: 'Slow descent from alpha through theta into delta. Ends dim and slow.',
               keys: [[0, 10, 10], [10, 6, 6], [25, 2.5, 3], [30, 1.5, 2]] },
+};
+
+const BREATH_PRESETS = {
+  tantric:   { name: 'Slow tantric breath · 6 · 2 · 6 · 2', v: [6, 2, 6, 2] },
+  pranayama: { name: 'Pranayama 1 : 4 : 2 · 4 · 16 · 8', v: [4, 16, 8, 0] },
+  box:       { name: 'Box breath · 4 · 4 · 4 · 4', v: [4, 4, 4, 4] },
+  resonant:  { name: 'Resonant · 5 in · 5 out', v: [5, 0, 5, 0] },
+  custom:    { name: 'Custom', v: null },
 };
 
 /* ---------- Settings ---------- */
@@ -224,6 +235,8 @@ const DEFAULTS = {
   sigilText: 'MY WILL IS STRONG', sigilSquare: 'saturn', sigilCipher: 'gematria', sigilFit: 'zeros', sigilDedupe: true,
   sigilSize: 85, sigilWeight: 10, sigilCircle: true, sigilGrid: false,
   useMadeSigil: false,
+  breathOn: false, breathPattern: 'tantric', breathIn: 6, breathHoldIn: 2, breathOut: 6, breathHoldOut: 2,
+  breathLight: 'replace', breathFloor: 5, breathSound: true, sigilAlt: false, sigilAltHz: 2,
   imgColor: 'recolor', imgInk: '#000000', imgPaper: '#ffffff', imgPaperOn: false,
   audioOn: true, carrier: 200, beatSource: 'avg', manualBeat: 10, volume: 40, noise: 0,
 };
@@ -253,6 +266,22 @@ const SCHEMA = [
       note: 'The sigil only appears during the gaze and the charge sequence. Afterwards it stays hidden so you can forget it. The complementary colour fades back during the release.' },
     { key: 'duration', type: 'range', label: 'Length', min: 1, max: 90, step: 1, fmt: v => v + ' min', show: isManual },
     { key: 'fadeSec', type: 'range', label: 'Fade in / out', min: 0, max: 30, step: 1, fmt: v => v + ' s' },
+  ]},
+  { title: 'Breath guide', items: [
+    { key: 'breathOn', type: 'toggle', label: 'Light follows a breathing pattern' },
+    { key: 'breathPattern', type: 'select', label: 'Pattern', show: s => s.breathOn, options: Object.entries(BREATH_PRESETS).map(([k, b]) => [k, b.name]) },
+    { key: 'breathIn', type: 'range', label: 'Inhale (fade in)', min: 0, max: 20, step: 0.5, fmt: v => v + ' s', show: s => s.breathOn },
+    { key: 'breathHoldIn', type: 'range', label: 'Hold full', min: 0, max: 30, step: 0.5, fmt: v => v + ' s', show: s => s.breathOn },
+    { key: 'breathOut', type: 'range', label: 'Exhale (fade out)', min: 0, max: 30, step: 0.5, fmt: v => v + ' s', show: s => s.breathOn },
+    { key: 'breathHoldOut', type: 'range', label: 'Hold empty', min: 0, max: 30, step: 0.5, fmt: v => v + ' s', show: s => s.breathOn },
+    { type: 'custom', render: renderBreathNote, show: s => s.breathOn },
+    { key: 'breathLight', type: 'select', label: 'Flicker during breathing', show: s => s.breathOn, options: [
+      ['replace', 'Off: smooth glow that breathes'], ['modulate', 'On: flicker keeps going, brightness breathes']] },
+    { key: 'breathFloor', type: 'range', label: 'Lowest light on empty lungs', min: 0, max: 50, step: 1, fmt: v => v + '%', show: s => s.breathOn },
+    { key: 'breathSound', type: 'toggle', label: 'Sound swells and falls with the breath', show: s => s.breathOn && s.audioOn },
+    { key: 'sigilAlt', type: 'toggle', label: 'Flash the sigil alternating left and right eye' },
+    { key: 'sigilAltHz', type: 'range', label: 'Sigil flash rate (each eye)', min: 0.5, max: 12, step: 0.5, fmt: v => v + ' per s', show: s => s.sigilAlt,
+      note: 'The sigil is shown to one eye at a time and swaps continuously, independent of the light.' },
   ]},
   { title: 'Light · each eye', items: [
     { key: 'leftHz', type: 'range', label: 'Left eye', min: 0.5, max: 40, step: 0.1, fmt: hz, show: isManual },
@@ -386,6 +415,7 @@ function buildPanel() {
   renderThumbs();
   drawChart();
   updateSigil();
+  updateBreathNote();
   panel.scrollTop = scroll;
 }
 
@@ -399,6 +429,20 @@ function changed(key) {
   refreshVisibility();
   if (['program', 'duration', 'leftHz', 'rightHz', 'chargeMin', 'signalBlinks', 'holdSec', 'releaseSec', 'gazeMin'].includes(key)) drawChart();
   if (key === 'program' && running) { elapsed = 0; }
+  if (key === 'program' && PROGRAMS[S.program].breath) {
+    // the tantric program turns on the breath guide and alternating sigil
+    Object.assign(S, { breathOn: true, sigilAlt: true });
+    save(); buildPanel(); return;
+  }
+  if (key === 'breathPattern' && BREATH_PRESETS[S.breathPattern].v) {
+    [S.breathIn, S.breathHoldIn, S.breathOut, S.breathHoldOut] = BREATH_PRESETS[S.breathPattern].v;
+    save(); buildPanel(); return;
+  }
+  if (['breathIn', 'breathHoldIn', 'breathOut', 'breathHoldOut'].includes(key) && S.breathPattern !== 'custom') {
+    S.breathPattern = 'custom'; save();
+    const sel = $('f_breathPattern'); if (sel) sel.value = 'custom';
+  }
+  if (key.startsWith('breath')) updateBreathNote();
   if (key === 'audioOn' && running) { S.audioOn ? audioStart() : audioStop(); }
   if (key === 'imgAssign') { slideIdx = 0; prevIdx = null; }
   if (key.startsWith('sigil')) updateSigil();
@@ -539,6 +583,28 @@ function renderSettingsBlock() {
     catch (e) { say('That code isn\u2019t valid. Copy the whole code, including the { } brackets.'); }
   };
   return row;
+}
+
+/* ---------- Breath guide ---------- */
+function breathCycle() { return S.breathIn + S.breathHoldIn + S.breathOut + S.breathHoldOut; }
+// Breath level 0..1 with eased fades, plus the phase name.
+function breathAt(t) {
+  const c = breathCycle();
+  if (!(c > 0)) return { b: 1, label: '' };
+  let u = t % c;
+  const ease = x => .5 - .5 * Math.cos(Math.PI * x);
+  if (u < S.breathIn) return { b: ease(u / S.breathIn), label: 'Inhale' };
+  u -= S.breathIn;
+  if (u < S.breathHoldIn) return { b: 1, label: 'Hold' };
+  u -= S.breathHoldIn;
+  if (u < S.breathOut) return { b: 1 - ease(u / S.breathOut), label: 'Exhale' };
+  return { b: 0, label: 'Hold empty' };
+}
+function renderBreathNote() { const r = el('div', 'row'); r.appendChild(el('div', 'note', '')).id = 'breathNote'; return r; }
+function updateBreathNote() {
+  const n = $('breathNote'); if (!n) return;
+  const c = breathCycle();
+  n.textContent = c > 0 ? `One breath takes ${+c.toFixed(1)} s, about ${(60 / c).toFixed(1)} breaths a minute.` : 'Set at least one phase above 0 s.';
 }
 
 /* ---------- Refresh-rate awareness ---------- */
@@ -819,13 +885,14 @@ function audioStop() {
   a.master.gain.linearRampToValueAtTime(0, now + 1.2);
   setTimeout(() => { try { a.oL.stop(); a.oR.stop(); a.nsrc.stop(); a.master.disconnect(); } catch (e) {} }, 1400);
 }
-function audioUpdate(L, R, env) {
+function audioUpdate(L, R, env, br = 1) {
   if (!A) return;
   const now = AC.currentTime, beat = beatFor(L, R);
   A.oL.frequency.setTargetAtTime(Math.max(20, S.carrier - beat / 2), now, .05);
   A.oR.frequency.setTargetAtTime(S.carrier + beat / 2, now, .05);
-  A.tone.gain.setTargetAtTime(.45 * (S.volume / 100) ** 2 * env, now, .1);
-  A.noiseG.gain.setTargetAtTime(.6 * (S.noise / 100) ** 2 * env, now, .1);
+  const swell = S.breathOn && S.breathSound ? .25 + .75 * br : 1;
+  A.tone.gain.setTargetAtTime(.45 * (S.volume / 100) ** 2 * env * swell, now, .1);
+  A.noiseG.gain.setTargetAtTime(.6 * (S.noise / 100) ** 2 * env * swell, now, .1);
 }
 
 /* ---------- Light rendering ---------- */
@@ -882,7 +949,7 @@ function drawEyeImage(spec, cx, cy, fw, fh, alpha) {
   ctx.drawImage(spec.s, spec.sx, spec.sy, spec.sw, spec.sh, cx - dw / 2, cy - dh / 2, dw, dh);
 }
 
-function drawEye(eye, x0, w, intensity, color, hzNow, slideP) {
+function drawEye(eye, x0, w, intensity, color, hzNow, slideP, gate) {
   const cxBase = x0 + w / 2, shift = (S.eyeShift / 100) * (w / 2);
   const cx = cxBase + (eye === 'L' ? -shift : shift), cy = H / 2;
   ctx.save();
@@ -902,7 +969,7 @@ function drawEye(eye, x0, w, intensity, color, hzNow, slideP) {
   }
   // image overlay
   if (images.length) {
-    const op = S.imgOpacity / 100 * env * imgGate;
+    const op = S.imgOpacity / 100 * env * gate;
     const ia = S.imgMode === 'light' ? op * intensity : S.imgMode === 'dark' ? op * (1 - intensity) : op;
     ctx.globalCompositeOperation = S.imgBlend;
     if (prevIdx !== null && slideP < 1) drawEyeImage(eyeImage(eye, prevIdx), cx, cy, fw, fh, ia * (1 - slideP));
@@ -958,18 +1025,26 @@ function frame(now) {
   const comp = S.chargeComp ? sp.comp : 0;
   imgGate = sp.gate; phaseLabel = sp.label;
   const cue = sp.pulse != null;   // closed-eye cue: slow pulse replaces the flicker
-  const iL = !running ? .5 : (cue ? sp.pulse : wave(phL)) * env;
-  const iR = !running ? .5 : (cue ? sp.pulse : wave((phR + S.phase / 360) % 1)) * env;
+  // breath guide: smooth glow (replace) or flicker scaled by the breath (modulate)
+  const bt = running && S.breathOn ? breathAt(elapsed) : null;
+  const lvl = bt ? S.breathFloor / 100 + (1 - S.breathFloor / 100) * bt.b : 1;
+  const lightOf = w => cue ? sp.pulse : bt ? (S.breathLight === 'replace' ? lvl : w * lvl) : w;
+  const iL = !running ? .5 : lightOf(wave(phL)) * env;
+  const iR = !running ? .5 : lightOf(wave((phR + S.phase / 360) % 1)) * env;
+  // alternating sigil: one eye at a time, swapping at sigilAltHz
+  const altLeft = Math.floor((running ? elapsed : now / 1000) * S.sigilAltHz * 2) % 2 === 0;
+  const gL = imgGate * (S.sigilAlt ? (altLeft ? 1 : 0) : 1), gR = imgGate * (S.sigilAlt ? (altLeft ? 0 : 1) : 1);
+  if (bt) phaseLabel = phaseLabel ? phaseLabel + ' · ' + bt.label : bt.label;
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   const half = W / 2, g = S.gap / 2;
-  drawEye('L', 0, half - g, iL, comp ? hueRotate(S.leftColor, 180 * comp) : S.leftColor, L, slideP);
-  drawEye('R', half + g, half - g, iR, comp ? hueRotate(S.rightColor, 180 * comp) : S.rightColor, R, slideP);
+  drawEye('L', 0, half - g, iL, comp ? hueRotate(S.leftColor, 180 * comp) : S.leftColor, L, slideP, gL);
+  drawEye('R', half + g, half - g, iR, comp ? hueRotate(S.rightColor, 180 * comp) : S.rightColor, R, slideP, gR);
 
   if (running) {
-    audioUpdate(L, R, env);
+    audioUpdate(L, R, env, bt ? bt.b : 1);
     if (S.readout) {
       ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.textAlign = 'center';
       const left = Math.max(0, T - elapsed);
