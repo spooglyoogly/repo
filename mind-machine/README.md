@@ -10,7 +10,7 @@ phone inside a VR / Cardboard-style headset so each lens sees one half of the sc
 ## Features
 - **Independent eye frequencies** (0.5–40 Hz) plus a right-eye phase offset (180° = alternating flash).
 - **Sigil charge program**: gaze at the sigil in alpha, descend to 6 Hz theta with it hidden, then a 1 s on / 1 s off signal, a 2 s slow-pulse cue you can sense with eyes closed, a steady charge where the flicker switches to the complementary colour at the same frequency, a fade-out release that turns the colour back, and the sigil stays hidden afterwards. All timings adjustable.
-- **Tantric breath program and breath guide**: the light fades in on the inhale, holds, and fades out on the exhale (slow tantric 6·2·6·2, pranayama 1:4:2, box, resonant, or custom timings), either as a smooth glow or with the flicker continuing underneath. Sound can swell with the breath, and the sigil can flash alternating left and right eye at a set rate.
+- **Tantric breath program and breath guide**: the light fades in on the inhale, holds, and fades out on the exhale (slow tantric 6·2·6·2, pranayama 1:4:2, box, resonant, or custom timings), either as a smooth glow or with the flicker continuing underneath. Sound can swell with the breath, and the sigil can appear only on the breath hold (full, empty, or both), flashing alternating left and right eye at a set rate.
 - **Programs** that ramp each eye over time (alpha, split alpha/theta, theta, beta focus, sleep) with a live chart.
 - **Waveforms**: square (adjustable on-time), sine, triangle; per-eye colour and brightness; fade in/out.
 - **Image overlay**: the default is a red sigil shown as black lines on red light. Load your own images, same image in both eyes, a different image per eye, or a side-by-side

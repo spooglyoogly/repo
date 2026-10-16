@@ -200,7 +200,7 @@ const PROGRAMS = {
   alpha:    { name: 'Alpha drift · 15 min', desc: 'Both eyes in sync, easing from 12 Hz down into relaxed alpha and back.',
               keys: [[0, 12, 12], [3, 10, 10], [12, 9, 9], [15, 10, 10]] },
   tantric:  { name: 'Tantric breath · 20 min', breath: true,
-              desc: 'The light fades in as you inhale, stays bright while you hold, and fades out as you exhale, while the sigil flashes left eye, right eye, without stopping.',
+              desc: 'The light fades in as you inhale, stays bright while you hold, and fades out as you exhale. While you hold the full breath, the sigil flashes left eye, right eye.',
               keys: [[0, 6, 6], [20, 6, 6]] },
   split:    { name: 'Split alpha / theta · 20 min', desc: 'Left eye holds 10 Hz alpha while the right eye slides into 6 Hz theta.',
               keys: [[0, 10, 10], [5, 10, 6], [15, 10, 6], [20, 10, 10]] },
@@ -236,7 +236,7 @@ const DEFAULTS = {
   sigilSize: 85, sigilWeight: 10, sigilCircle: true, sigilGrid: false,
   useMadeSigil: false,
   breathOn: false, breathPattern: 'tantric', breathIn: 6, breathHoldIn: 2, breathOut: 6, breathHoldOut: 2,
-  breathLight: 'replace', breathFloor: 5, breathSound: true, sigilAlt: false, sigilAltHz: 2,
+  breathLight: 'replace', breathFloor: 5, breathSound: true, sigilBreath: 'holdIn', sigilAlt: false, sigilAltHz: 2,
   imgColor: 'recolor', imgInk: '#000000', imgPaper: '#ffffff', imgPaperOn: false,
   audioOn: true, carrier: 200, beatSource: 'avg', manualBeat: 10, volume: 40, noise: 0,
 };
@@ -279,6 +279,8 @@ const SCHEMA = [
       ['replace', 'Off: smooth glow that breathes'], ['modulate', 'On: flicker keeps going, brightness breathes']] },
     { key: 'breathFloor', type: 'range', label: 'Lowest light on empty lungs', min: 0, max: 50, step: 1, fmt: v => v + '%', show: s => s.breathOn },
     { key: 'breathSound', type: 'toggle', label: 'Sound swells and falls with the breath', show: s => s.breathOn && s.audioOn },
+    { key: 'sigilBreath', type: 'select', label: 'Show the sigil', show: s => s.breathOn, options: [
+      ['holdIn', 'Only while holding a full breath'], ['holds', 'During both holds'], ['holdOut', 'Only while holding empty'], ['always', 'The whole breath']] },
     { key: 'sigilAlt', type: 'toggle', label: 'Flash the sigil alternating left and right eye' },
     { key: 'sigilAltHz', type: 'range', label: 'Sigil flash rate (each eye)', min: 0.5, max: 12, step: 0.5, fmt: v => v + ' per s', show: s => s.sigilAlt,
       note: 'The sigil is shown to one eye at a time and swaps continuously, independent of the light.' },
@@ -431,7 +433,7 @@ function changed(key) {
   if (key === 'program' && running) { elapsed = 0; }
   if (key === 'program' && PROGRAMS[S.program].breath) {
     // the tantric program turns on the breath guide and alternating sigil
-    Object.assign(S, { breathOn: true, sigilAlt: true });
+    Object.assign(S, { breathOn: true, sigilAlt: true, sigilBreath: 'holdIn' });
     save(); buildPanel(); return;
   }
   if (key === 'breathPattern' && BREATH_PRESETS[S.breathPattern].v) {
@@ -1033,7 +1035,12 @@ function frame(now) {
   const iR = !running ? .5 : lightOf(wave((phR + S.phase / 360) % 1)) * env;
   // alternating sigil: one eye at a time, swapping at sigilAltHz
   const altLeft = Math.floor((running ? elapsed : now / 1000) * S.sigilAltHz * 2) % 2 === 0;
-  const gL = imgGate * (S.sigilAlt ? (altLeft ? 1 : 0) : 1), gR = imgGate * (S.sigilAlt ? (altLeft ? 0 : 1) : 1);
+  let gL = imgGate * (S.sigilAlt ? (altLeft ? 1 : 0) : 1), gR = imgGate * (S.sigilAlt ? (altLeft ? 0 : 1) : 1);
+  if (bt && S.sigilBreath !== 'always') {
+    const on = S.sigilBreath === 'holds' ? bt.label === 'Hold' || bt.label === 'Hold empty'
+      : S.sigilBreath === 'holdOut' ? bt.label === 'Hold empty' : bt.label === 'Hold';
+    if (!on) { gL = 0; gR = 0; }
+  }
   if (bt) phaseLabel = phaseLabel ? phaseLabel + ' · ' + bt.label : bt.label;
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
