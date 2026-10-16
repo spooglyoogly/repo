@@ -202,6 +202,11 @@ const PROGRAMS = {
   tantric:  { name: 'Tantric breath · 20 min', breath: true,
               desc: 'The light fades in as you inhale, stays bright while you hold, and fades out as you exhale. While you hold the full breath, the sigil flashes left eye, right eye.',
               keys: [[0, 6, 6], [20, 6, 6]] },
+  hfo:      { name: 'HFO waves · 32 min',
+              desc: 'Settle in alpha, descend into theta, then swells of pulse rate and brightness that grow with each wave, a sustained climb to a peak and hold, and a slow afterglow. Light and isochronic sound move together.',
+              keys: [[0, 10, 10], [6, 10, 10], [10, 6, 6], [24, 7, 7], [26, 14, 14], [27, 14, 14], [32, 9, 9]],
+              waves: { start: 10, end: 24, period: 1.5, amp0: 1, amp1: 5, low0: .55, low1: .15 },
+              phases: [[0, 'Settle'], [6, 'Descend'], [10, 'Waves'], [24, 'Peak'], [26, 'Hold'], [27, 'Afterglow']] },
   split:    { name: 'Split alpha / theta · 20 min', desc: 'Left eye holds 10 Hz alpha while the right eye slides into 6 Hz theta.',
               keys: [[0, 10, 10], [5, 10, 6], [15, 10, 6], [20, 10, 10]] },
   theta:    { name: 'Theta descent · 25 min', desc: 'A 0.5 Hz offset between the eyes while both descend toward 5 Hz.',
@@ -234,7 +239,7 @@ const DEFAULTS = {
   chargeMin: 11, gazeMin: 3, signalBlinks: 5, holdSec: 20, releaseSec: 10,
   sigilText: 'MY WILL IS STRONG', sigilSquare: 'saturn', sigilCipher: 'gematria', sigilFit: 'zeros', sigilDedupe: true,
   sigilSize: 85, sigilWeight: 10, sigilCircle: true, sigilGrid: false,
-  useMadeSigil: false,
+  useMadeSigil: false, audioMode: 'binaural',
   breathOn: false, breathPattern: 'tantric', breathIn: 6, breathHoldIn: 2, breathOut: 6, breathHoldOut: 2,
   breathLight: 'modulate', breathFloor: 5,
   breathHud: true, hudSize: 30, hudOpacity: 80, hudColor: '#ffffff', hudText: true, breathSound: true, sigilBreath: 'holdIn', sigilAlt: false, sigilAltHz: 2,
@@ -337,8 +342,11 @@ const SCHEMA = [
     { key: 'sigilCircle', type: 'toggle', label: 'Enclosing circle' },
     { key: 'sigilGrid', type: 'toggle', label: 'Show the square\u2019s grid' },
   ]},
-  { title: 'Binaural sound', items: [
-    { key: 'audioOn', type: 'toggle', label: 'Play binaural beat (use headphones)' },
+  { title: 'Sound', items: [
+    { key: 'audioOn', type: 'toggle', label: 'Play sound' },
+    { key: 'audioMode', type: 'select', label: 'Sound type', show: s => s.audioOn, options: [
+      ['binaural', 'Binaural beat (needs headphones)'], ['isochronic', 'Isochronic pulses (any speaker)'], ['both', 'Both together']],
+      note: 'Isochronic pulses switch a single tone on and off at the beat rate, so they work without headphones.' },
     { key: 'beatSource', type: 'select', label: 'Beat frequency', show: s => s.audioOn,
       options: [['avg', 'Average of both eyes'], ['diff', 'Difference between eyes'], ['left', 'Match left eye'], ['right', 'Match right eye'], ['manual', 'Manual']] },
     { key: 'manualBeat', type: 'range', label: 'Manual beat', min: 0.5, max: 40, step: 0.1, fmt: hz, show: s => s.audioOn && s.beatSource === 'manual' },
@@ -441,6 +449,11 @@ function changed(key) {
   refreshVisibility();
   if (['program', 'duration', 'leftHz', 'rightHz', 'chargeMin', 'signalBlinks', 'holdSec', 'releaseSec', 'gazeMin'].includes(key)) drawChart();
   if (key === 'program' && running) { elapsed = 0; }
+  if (key === 'program' && PROGRAMS[S.program].waves) {
+    // wave programs pair the light with isochronic pulses and run without the breath guide
+    Object.assign(S, { audioOn: true, audioMode: 'both', breathOn: false });
+    save(); buildPanel(); return;
+  }
   if (key === 'program' && PROGRAMS[S.program].breath) {
     // the tantric program turns on the breath guide and alternating sigil
     Object.assign(S, { breathOn: true, sigilAlt: true, sigilBreath: 'holdIn', breathLight: 'modulate', breathHud: true });
@@ -466,7 +479,25 @@ function totalSec() {
   const p = PROGRAMS[S.program];
   return p.keys ? p.keys[p.keys.length - 1][0] * 60 : S.duration * 60;
 }
+// Swells for wave programs: 0..1 shape, growing frequency lift, deepening brightness troughs.
+function waveAt(t) {
+  const w = PROGRAMS[S.program].waves, m = t / 60;
+  if (!w || m < w.start || m >= w.end) return { lift: 0, bright: 1, n: 0 };
+  const u = (m - w.start) / (w.end - w.start), sw = .5 - .5 * Math.cos(2 * Math.PI * (m - w.start) / w.period);
+  const low = w.low0 + (w.low1 - w.low0) * u;
+  return { lift: (w.amp0 + (w.amp1 - w.amp0) * u) * sw, bright: low + (1 - low) * sw, n: Math.floor((m - w.start) / w.period) + 1 };
+}
+function programLabel(t) {
+  const ph = PROGRAMS[S.program].phases; if (!ph) return '';
+  let l = ''; for (const [m, name] of ph) if (t / 60 >= m) l = name;
+  const w = waveAt(t);
+  return w.n ? `${l} ${w.n}` : l;
+}
 function freqsAt(t) {
+  const f = baseFreqsAt(t), lift = waveAt(t).lift;
+  return lift ? { L: f.L + lift, R: f.R + lift } : f;
+}
+function baseFreqsAt(t) {
   const p = PROGRAMS[S.program];
   if (!p.keys) return { L: S.leftHz, R: S.rightHz };
   const k = p.keys, m = t / 60;
@@ -523,7 +554,7 @@ function drawChart() {
   const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
   const T = totalSec();
   let maxHz = 0;
-  for (let i = 0; i <= 60; i++) { const f = freqsAt(T * i / 60); maxHz = Math.max(maxHz, f.L, f.R); }
+  for (let i = 0; i <= 480; i++) { const f = freqsAt(T * i / 480); maxHz = Math.max(maxHz, f.L, f.R); }
   maxHz = Math.max(5, Math.ceil(maxHz / 5) * 5);
   const padL = 30, padB = 18, padT = 6, padR = 6;
   const x = t => padL + (W - padL - padR) * (t / T);
@@ -548,7 +579,7 @@ function drawChart() {
   }
   for (const [k, col] of [['L', tok('--eye-l')], ['R', tok('--eye-r')]]) {
     g.strokeStyle = col; g.lineWidth = 2; g.beginPath();
-    for (let i = 0; i <= 120; i++) { const t = T * i / 120, f = freqsAt(t)[k]; i ? g.lineTo(x(t), y(f)) : g.moveTo(x(t), y(f)); }
+    for (let i = 0; i <= 480; i++) { const t = T * i / 480, f = freqsAt(t)[k]; i ? g.lineTo(x(t), y(f)) : g.moveTo(x(t), y(f)); }
     g.stroke();
   }
   if (running) {
@@ -886,8 +917,17 @@ function audioStart() {
     oL.connect(merger, 0, 0); oR.connect(merger, 0, 1);
     const noiseG = AC.createGain(); noiseG.gain.value = 0; noiseG.connect(master);
     const nsrc = AC.createBufferSource(); nsrc.buffer = pinkBuffer(AC); nsrc.loop = true; nsrc.connect(noiseG);
-    oL.start(); oR.start(); nsrc.start();
-    A = { master, tone, oL, oR, noiseG, nsrc };
+    // isochronic: one carrier tone gated on/off by a softened square LFO at the beat rate
+    const isoOsc = AC.createOscillator(); isoOsc.type = 'sine';
+    const isoAmp = AC.createGain(); isoAmp.gain.value = .5;
+    const isoVol = AC.createGain(); isoVol.gain.value = 0;
+    const lfo = AC.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 10;
+    const soften = AC.createBiquadFilter(); soften.type = 'lowpass'; soften.frequency.value = 120;
+    const lfoDepth = AC.createGain(); lfoDepth.gain.value = .5;
+    lfo.connect(soften); soften.connect(lfoDepth); lfoDepth.connect(isoAmp.gain);
+    isoOsc.connect(isoAmp); isoAmp.connect(isoVol); isoVol.connect(master);
+    oL.start(); oR.start(); nsrc.start(); isoOsc.start(); lfo.start();
+    A = { master, tone, oL, oR, noiseG, nsrc, isoOsc, isoVol, lfo };
   } catch (e) { A = null; }
 }
 function audioStop() {
@@ -897,15 +937,19 @@ function audioStop() {
   a.master.gain.cancelScheduledValues(now);
   a.master.gain.setValueAtTime(a.master.gain.value, now);
   a.master.gain.linearRampToValueAtTime(0, now + 1.2);
-  setTimeout(() => { try { a.oL.stop(); a.oR.stop(); a.nsrc.stop(); a.master.disconnect(); } catch (e) {} }, 1400);
+  setTimeout(() => { try { a.oL.stop(); a.oR.stop(); a.nsrc.stop(); a.isoOsc.stop(); a.lfo.stop(); a.master.disconnect(); } catch (e) {} }, 1400);
 }
-function audioUpdate(L, R, env, br = 1) {
+function audioUpdate(L, R, env, br = 1, wb = 1) {
   if (!A) return;
   const now = AC.currentTime, beat = beatFor(L, R);
   A.oL.frequency.setTargetAtTime(Math.max(20, S.carrier - beat / 2), now, .05);
   A.oR.frequency.setTargetAtTime(S.carrier + beat / 2, now, .05);
-  const swell = S.breathOn && S.breathSound ? .25 + .75 * br : 1;
-  A.tone.gain.setTargetAtTime(.45 * (S.volume / 100) ** 2 * env * swell, now, .1);
+  const swell = (S.breathOn && S.breathSound ? .25 + .75 * br : 1) * (.35 + .65 * wb);
+  const vol = .45 * (S.volume / 100) ** 2 * env * swell;
+  A.tone.gain.setTargetAtTime(S.audioMode === 'isochronic' ? 0 : vol, now, .1);
+  A.isoOsc.frequency.setTargetAtTime(S.carrier, now, .05);
+  A.lfo.frequency.setTargetAtTime(Math.max(.5, beat), now, .05);
+  A.isoVol.gain.setTargetAtTime(S.audioMode === 'binaural' ? 0 : vol * (S.audioMode === 'both' ? .7 : 1), now, .1);
   A.noiseG.gain.setTargetAtTime(.6 * (S.noise / 100) ** 2 * env * swell, now, .1);
 }
 
@@ -1109,7 +1153,8 @@ function frame(now) {
   // breath guide: smooth glow (replace) or flicker scaled by the breath (modulate)
   const bt = running && S.breathOn ? breathAt(elapsed) : null;
   const lvl = bt ? S.breathFloor / 100 + (1 - S.breathFloor / 100) * bt.b : 1;
-  const lightOf = w => cue ? sp.pulse : !bt || S.breathLight === 'steady' ? w : S.breathLight === 'replace' ? lvl : w * lvl;
+  const wv = running ? waveAt(elapsed) : { bright: 1 };
+  const lightOf = w => (cue ? sp.pulse : !bt || S.breathLight === 'steady' ? w : S.breathLight === 'replace' ? lvl : w * lvl) * wv.bright;
   // indicator: live while running, a sample frame in the idle preview
   hud = S.breathOn && S.breathHud ? (bt || (running ? null : Object.assign(breathAt(S.breathIn * .6), { b: .6 }))) : null;
   const iL = !running ? .5 : lightOf(wave(phL)) * env;
@@ -1123,6 +1168,7 @@ function frame(now) {
     if (!on) { gL = 0; gR = 0; }
   }
   if (bt) phaseLabel = phaseLabel ? phaseLabel + ' · ' + bt.label : bt.label;
+  if (running && !phaseLabel) phaseLabel = programLabel(elapsed);
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
@@ -1132,7 +1178,7 @@ function frame(now) {
   drawEye('R', half + g, half - g, iR, comp ? hueRotate(S.rightColor, 180 * comp) : S.rightColor, R, slideP, gR);
 
   if (running) {
-    audioUpdate(L, R, env, bt ? bt.b : 1);
+    audioUpdate(L, R, env, bt ? bt.b : 1, wv.bright);
     if (S.readout) {
       ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.textAlign = 'center';
       const left = Math.max(0, T - elapsed);
